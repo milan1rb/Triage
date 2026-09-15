@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Triage</title>
+<style>
+  :root {
+    --paper: #f1f2f4;
+    --surface: #ffffff;
+    --ink: #15181c;
+    --muted: #767c85;
+    --line: #e1e4e8;
+    --radius: 10px;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.45;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  /* ---------- en-tete + onglets persistants ---------- */
+
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .bar {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 14px 16px 10px;
+  }
+  .bar h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+  .bar button { font-size: 14px; color: var(--muted); }
+
+  .tabs {
+    display: flex; gap: 4px; overflow-x: auto; padding: 0 12px;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+
+  .tab {
+    flex: 0 0 auto; padding: 8px 10px 11px;
+    font-size: 15px; color: var(--muted);
+    border-bottom: 2px solid transparent;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .tab[aria-selected="true"] { color: var(--ink); font-weight: 550; }
+
+  .count {
+    min-width: 19px; height: 19px; padding: 0 5px;
+    border-radius: 10px; font-size: 12px; font-weight: 600;
+    color: #fff; display: grid; place-items: center;
+  }
+
+  /* ---------- liste ---------- */
+
+  main { padding: 10px 12px 28px; }
+
+  .row {
+    display: flex; gap: 12px; align-items: flex-start;
+    width: 100%; text-align: left;
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    margin-bottom: 7px;
+    border-left: 3px solid transparent;
+  }
+  .row:active { background: #f7f8f9; }
+
+  .row-main { flex: 1; min-width: 0; }
+  .row-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .name { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .time { font-size: 12px; color: var(--muted); flex: 0 0 auto; }
+  .preview {
+    font-size: 14px; color: var(--muted); margin-top: 2px;
+    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .unread .name { font-weight: 650; }
+  .unread .preview { color: var(--ink); }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 8px; flex: 0 0 auto; }
+
+  /* ---------- etats vides / reglages ---------- */
+
+  .panel {
+    background: var(--surface); border-radius: var(--radius);
+    padding: 20px 18px; margin: 12px;
+  }
+  .panel h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
+  .panel p { margin: 0 0 14px; color: var(--muted); font-size: 15px; }
+
+  .action {
+    background: var(--ink); color: var(--surface);
+    padding: 11px 16px; border-radius: 8px; font-weight: 550; font-size: 15px;
+  }
+  .action.ghost { background: var(--paper); color: var(--ink); }
+
+  .field {
+    width: 100%; padding: 10px 12px; margin-bottom: 8px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  }
+
+  .folder-edit { border-top: 1px solid var(--line); padding: 16px 0 4px; }
+  .folder-edit:first-of-type { border-top: 0; }
+  .swatches { display: flex; gap: 8px; margin: 10px 0 12px; }
+  .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; }
+  .swatch[aria-pressed="true"] { border-color: var(--ink); }
+  .hint { font-size: 13px; color: var(--muted); margin: -4px 0 10px; }
+
+  .sheet-actions { display: flex; gap: 8px; margin-top: 18px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <h1 id="screen-title">Triage</h1>
+    <button id="toggle-settings">Dossiers</button>
+  </div>
+  <div class="tabs" id="tabs" role="tablist"></div>
+</header>
+
+<main id="main"></main>
+
+<script>
+/* ------------------------------------------------------------------ */
+/* Pont natif                                                          */
+/* ------------------------------------------------------------------ */
+
+/* Sur le telephone, Android expose window.AndroidBridge.
+   Dans un navigateur, on bascule sur des conversations factices pour
+   pouvoir travailler l'interface sans reinstaller l'APK. */
+
+const Bridge = window.AndroidBridge ? {
+  isEnabled:     () => AndroidBridge.isEnabled(),
+  openSettings:  () => AndroidBridge.openSettings(),
+  getMessages:   () => JSON.parse(AndroidBridge.getMessages() || '[]'),
+  clearMessages: () => AndroidBridge.clearMessages(),
+  openChat:      p  => AndroidBridge.openChat(p || '')
+} : demoBridge();
+
+function demoBridge() {
+  const now = Date.now(), min = 60000;
+  const messages = [
+    { id:'1', conversation:'Marie Lambert',   sender:'Marie Lambert',   text:"Bonjour, oui je suis interessee, on peut en parler ?", isGroup:false, postTime: now - 4*min },
+    { id:'2', conversation:'Antoine Ferrand', sender:'Antoine Ferrand', text:'Pas disponible avant la semaine prochaine',            isGroup:false, postTime: now - 41*min },
+    { id:'3', conversation:'Famille',         sender:'Papa',            text:'On vous attend dimanche midi',                         isGroup:true,  postTime: now - 92*min },
+    { id:'4', conversation:'Sophie Renaud',   sender:'Sophie Renaud',   text:'Vous pouvez me renvoyer le document ?',                isGroup:false, postTime: now - 180*min },
+    { id:'5', conversation:'Asso Rando',      sender:'Claire',          text:'Sortie annulee, trop de pluie annoncee',               isGroup:true,  postTime: now - 1560*min },
+    { id:'6', conversation:'Karim Belaid',    sender:'Karim Belaid',    text:'Merci pour votre message',                             isGroup:false, postTime: now - 1800*min }
+  ];
+  return {
+    isEnabled:     () => true,
+    openSettings:  () => {},
+    getMessages:   () => messages,
+    clearMessages: () => { messages.length = 0; },
+    openChat:      p  => alert(p ? 'Ouvrirait WhatsApp sur ' + p : 'Ouvrirait WhatsApp')
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Etat                                                                */
+/* ------------------------------------------------------------------ */
+
+const COLORS = ['#2f6fed', '#0f8a5f', '#b4471f', '#7b4bc4', '#0f7b8a', '#9c6b1f'];
+
+const defaults = {
+  folders: [
+    { id: 'f1', name: 'Prospection', color: COLORS[2], rules: [] },
+    { id: 'f2', name: 'Perso', color: COLORS[0], rules: [] }
+  ],
+  defaultFolder: 'f1',
+  seen: {},   // conversation -> timestamp du dernier message consulte
+  phones: {}  // conversation -> numero international
+};
+
+const config = load();
+let messages = [];
+let active = config.defaultFolder;
+let settingsOpen = false;
+
+function load() {
+  try {
+    return { ...defaults, ...JSON.parse(localStorage.getItem('triage') || '{}') };
+  } catch {
+    return { ...defaults };
+  }
+}
+function save() {
+  localStorage.setItem('triage', JSON.stringify(config));
+}
+
+/* ------------------------------------------------------------------ */
+/* Regroupement des notifications en conversations                     */
+/* ------------------------------------------------------------------ */
+
+function conversations() {
+  const byName = new Map();
+  for (const m of messages) {
+    const current = byName.get(m.conversation);
+    if (!current || m.postTime > current.postTime) {
+      byName.set(m.conversation, m);
+    }
+  }
+  return [...byName.values()].sort((a, b) => b.postTime - a.postTime);
+}
+
+function folderOf(name) {
+  const key = name.toLowerCase();
+  for (const f of config.folders) {
+    if (f.rules.some(r => r && key.includes(r.toLowerCase()))) return f.id;
+  }
+  return null;
+}
+
+function isUnread(c) {
+  return c.postTime > (config.seen[c.conversation] || 0);
+}
+
+/* ------------------------------------------------------------------ */
+/* Rendu                                                               */
+/* ------------------------------------------------------------------ */
+
+function render() {
+  renderTabs();
+  document.getElementById('main').innerHTML = '';
+  if (settingsOpen) return renderSettings();
+  renderList();
+}
+
+function renderTabs() {
+  const tabs = document.getElementById('tabs');
+  tabs.innerHTML = '';
+  if (settingsOpen) { tabs.style.display = 'none'; return; }
+  tabs.style.display = 'flex';
+
+  const all = conversations();
+
+  for (const f of config.folders) {
+    const unread = all.filter(c => folderOf(c.conversation) === f.id && isUnread(c)).length;
+    const btn = document.createElement('button');
+    btn.className = 'tab';
+    btn.role = 'tab';
+    btn.setAttribute('aria-selected', active === f.id);
+    btn.innerHTML = `<span>${escape(f.name)}</span>`;
+    if (unread) {
+      const badge = document.createElement('span');
+      badge.className = 'count';
+      badge.style.background = f.color;
+      badge.textContent = unread > 99 ? '99+' : unread;
+      btn.append(badge);
+    }
+    btn.onclick = () => { active = f.id; render(); };
+    tabs.append(btn);
+  }
+
+  const unsorted = all.filter(c => !folderOf(c.conversation));
+  const btn = document.createElement('button');
+  btn.className = 'tab';
+  btn.role = 'tab';
+  btn.setAttribute('aria-selected', active === 'unsorted');
+  btn.innerHTML = `<span>A classer</span>`;
+  if (unsorted.length) {
+    const badge = document.createElement('span');
+    badge.className = 'count';
+    badge.style.background = '#767c85';
+    badge.textContent = unsorted.length;
+    btn.append(badge);
+  }
+  btn.onclick = () => { active = 'unsorted'; render(); };
+  tabs.append(btn);
+}
+
+function renderList() {
+  const main = document.getElementById('main');
+  const rows = conversations().filter(c =>
+    active === 'unsorted' ? !folderOf(c.conversation) : folderOf(c.conversation) === active
+  );
+
+  if (!rows.length) {
+    main.innerHTML = `<div class="panel">
+      <h2>Rien ici pour l'instant</h2>
+      <p>Les conversations apparaissent des qu'un message arrive. Range-les dans un dossier depuis l'onglet A classer.</p>
+    </div>`;
+    return;
+  }
+
+  for (const c of rows) {
+    const folder = config.folders.find(f => f.id === folderOf(c.conversation));
+    const row = document.createElement('button');
+    row.className = 'row' + (isUnread(c) ? ' unread' : '');
+    if (folder) row.style.borderLeftColor = folder.color;
+    row.innerHTML = `
+      <div class="row-main">
+        <div class="row-top">
+          <span class="name">${escape(c.conversation)}</span>
+          <span class="time">${clock(c.postTime)}</span>
+        </div>
+        <div class="preview">${escape(c.isGroup ? c.sender + ' : ' + c.text : c.text)}</div>
+      </div>`;
+    if (isUnread(c)) {
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = folder ? folder.color : '#767c85';
+      row.append(dot);
+    }
+    row.onclick = () => open(c);
+    main.append(row);
+  }
+}
+
+function renderSettings() {
+  const main = document.getElementById('main');
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `<h2>Tes dossiers</h2>
+    <p>Une conversation rejoint un dossier quand son nom contient l'un des mots-cles. Le dossier par defaut est celui qui s'ouvre au lancement.</p>`;
+
+  for (const f of config.folders) {
+    const block = document.createElement('div');
+    block.className = 'folder-edit';
+
+    const name = document.createElement('input');
+    name.className = 'field';
+    name.value = f.name;
+    name.setAttribute('aria-label', 'Nom du dossier');
+    name.oninput = () => { f.name = name.value; save(); renderTabs(); };
+
+    const rules = document.createElement('input');
+    rules.className = 'field';
+    rules.value = f.rules.join(', ');
+    rules.placeholder = 'Marie, Dupont, Chantier';
+    rules.setAttribute('aria-label', 'Mots-cles');
+    rules.oninput = () => {
+      f.rules = rules.value.split(',').map(s => s.trim()).filter(Boolean);
+      save();
+    };
+
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'Mots-cles, separes par des virgules';
+
+    const swatches = document.createElement('div');
+    swatches.className = 'swatches';
+    for (const color of COLORS) {
+      const s = document.createElement('button');
+      s.className = 'swatch';
+      s.style.background = color;
+      s.setAttribute('aria-pressed', f.color === color);
+      s.setAttribute('aria-label', 'Couleur ' + color);
+      s.onclick = () => { f.color = color; save(); render(); };
+      swatches.append(s);
+    }
+
+    const def = document.createElement('button');
+    def.className = 'action ghost';
+    def.textContent = config.defaultFolder === f.id ? 'Dossier par defaut' : 'Definir par defaut';
+    def.disabled = config.defaultFolder === f.id;
+    def.onclick = () => { config.defaultFolder = f.id; save(); render(); };
+
+    const del = document.createElement('button');
+    del.className = 'action ghost';
+    del.textContent = 'Supprimer';
+    del.onclick = () => {
+      config.folders = config.folders.filter(x => x.id !== f.id);
+      if (config.defaultFolder === f.id) config.defaultFolder = config.folders[0]?.id;
+      active = config.defaultFolder || 'unsorted';
+      save(); render();
+    };
+
+    const actions = document.createElement('div');
+    actions.className = 'sheet-actions';
+    actions.append(def, del);
+
+    block.append(name, rules, hint, swatches, actions);
+    panel.append(block);
+  }
+
+  const add = document.createElement('button');
+  add.className = 'action';
+  add.textContent = 'Nouveau dossier';
+  add.style.marginTop = '18px';
+  add.onclick = () => {
+    config.folders.push({
+      id: 'f' + Date.now(),
+      name: 'Sans nom',
+      color: COLORS[config.folders.length % COLORS.length],
+      rules: []
+    });
+    save(); render();
+  };
+
+  panel.append(add);
+  main.append(panel);
+}
+
+/* ------------------------------------------------------------------ */
+/* Ouverture vers WhatsApp                                             */
+/* ------------------------------------------------------------------ */
+
+function open(c) {
+  config.seen[c.conversation] = c.postTime;
+  save();
+  render();
+
+  let phone = config.phones[c.conversation];
+  if (!phone && !c.isGroup) {
+    phone = prompt(
+      `Numero de ${c.conversation} pour ouvrir la conversation directement.\n` +
+      `Format international sans + : 33612345678.\n` +
+      `Laisse vide pour ouvrir simplement WhatsApp.`
+    );
+    if (phone) {
+      config.phones[c.conversation] = phone.replace(/\D/g, '');
+      save();
+    }
+  }
+
+  Bridge.openChat(config.phones[c.conversation] || '');
+}
+
+/* ------------------------------------------------------------------ */
+/* Demarrage                                                           */
+/* ------------------------------------------------------------------ */
+
+function refresh() {
+  messages = Bridge.getMessages() || [];
+  render();
+}
+
+/* Appelee par MainActivity.onResume(), au retour depuis WhatsApp. */
+window.onAppResume = function () {
+  if (Bridge.isEnabled()) refresh();
+};
+
+function boot() {
+  if (!Bridge.isEnabled()) {
+    document.getElementById('tabs').style.display = 'none';
+    document.getElementById('main').innerHTML = `<div class="panel">
+      <h2>Accorder l'acces aux notifications</h2>
+      <p>Triage lit les notifications de WhatsApp pour les repartir dans tes dossiers. Rien ne quitte ton telephone. Tu peux retirer cet acces a tout moment dans les reglages Android.</p>
+      <button class="action" id="grant">Ouvrir les reglages</button>
+    </div>`;
+    document.getElementById('grant').onclick = () => Bridge.openSettings();
+    return;
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refresh();
+  });
+  // Filet de securite : les notifications arrivent pendant que l'app est ouverte.
+  setInterval(refresh, 4000);
+
+  refresh();
+}
+
+document.getElementById('toggle-settings').onclick = () => {
+  settingsOpen = !settingsOpen;
+  document.getElementById('toggle-settings').textContent = settingsOpen ? 'Termine' : 'Dossiers';
+  document.getElementById('screen-title').textContent = settingsOpen ? 'Dossiers' : 'Triage';
+  render();
+};
+
+function escape(s) {
+  return String(s).replace(/[&<>"]/g, ch =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+}
+
+function clock(ts) {
+  const d = new Date(ts);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) {
+    return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+}
+
+boot();
+</script>
+</body>
+</html>
