@@ -59,6 +59,7 @@
     background: var(--chip); color: var(--muted); font-size: 14px;
   }
   .tab[aria-selected="true"] { background: var(--green-soft); color: var(--green-deep); font-weight: 600; }
+  .tab-sep { flex: 0 0 auto; align-self: center; color: var(--muted); opacity: .5; font-weight: 700; font-size: 18px; padding: 0 1px; user-select: none; }
 
   .count {
     min-width: 18px; height: 18px; padding: 0 5px;
@@ -256,15 +257,18 @@ function conversations() {
   return [...byName.values()].sort((a, b) => b.postTime - a.postTime);
 }
 
-/* Une conversation peut appartenir a plusieurs listes (choix manuel). */
+/* Une entree de config.lists peut etre un vrai onglet ou un separateur "|". */
+function isSeparator(l) {
+  return l.separator === true || String(l.name).trim() === '|';
+}
 function listsOf(name) {
-  return config.lists.filter(l => l.members.includes(name));
+  return config.lists.filter(l => !isSeparator(l) && l.members.includes(name));
 }
 function primaryList(name) {
   return listsOf(name)[0] || null;
 }
 function inAnyList(name) {
-  return config.lists.some(l => l.members.includes(name));
+  return config.lists.some(l => !isSeparator(l) && l.members.includes(name));
 }
 
 function isUnread(c) {
@@ -296,7 +300,21 @@ function avatarColor(name) {
 /* Rendu                                                               */
 /* ------------------------------------------------------------------ */
 
+function normalizeActive() {
+  if (active === 'unread') return;
+  const all = conversations();
+  if (active === 'unsorted') {
+    const has = all.some(c => !c.isGroup && !inAnyList(c.conversation));
+    if (!has) active = 'unread';
+    return;
+  }
+  // Un onglet de liste doit exister et ne pas etre un separateur.
+  const l = config.lists.find(x => x.id === active && !isSeparator(x));
+  if (!l) active = 'unread';
+}
+
 function render() {
+  normalizeActive();
   renderTabs();
   document.getElementById('main').innerHTML = '';
   if (settingsOpen) return renderSettings();
@@ -333,17 +351,27 @@ function renderTabs() {
   // Non lus (vue par defaut) : pastille = nombre de non-lus
   tabs.append(makeTab('unread', 'Non lus', unreadAll, unreadAll));
 
-  // Une liste editable par onglet : pastille = non-lus de la liste, sinon total en gris
+  // Listes editables et separateurs "|"
   for (const l of config.lists) {
+    if (isSeparator(l)) {
+      const sep = document.createElement('span');
+      sep.className = 'tab-sep';
+      sep.textContent = '|';
+      sep.setAttribute('aria-hidden', 'true');
+      tabs.append(sep);
+      continue;
+    }
     const inList = all.filter(c => l.members.includes(c.conversation));
     const unread = inList.filter(isUnread).length;
     tabs.append(makeTab(l.id, l.name, unread, inList.length));
   }
 
-  // A classer : contacts directs (tete-a-tete) pas encore ranges dans une liste
+  // A classer : contacts directs non ranges — masque si tout est classe
   const unsorted = all.filter(c => !c.isGroup && !inAnyList(c.conversation));
-  const unsortedUnread = unsorted.filter(isUnread).length;
-  tabs.append(makeTab('unsorted', 'A classer', unsortedUnread, unsorted.length));
+  if (unsorted.length > 0) {
+    const unsortedUnread = unsorted.filter(isUnread).length;
+    tabs.append(makeTab('unsorted', 'A classer', unsortedUnread, unsorted.length));
+  }
 }
 
 function renderList() {
@@ -441,6 +469,7 @@ function openAssignSheet(name) {
   sheet.append(h);
 
   for (const l of config.lists) {
+    if (isSeparator(l)) continue;
     const already = l.members.includes(name);
     const opt = document.createElement('button');
     opt.className = 'opt';
@@ -507,9 +536,55 @@ function renderSettings() {
 
   const all = conversations();
 
+  // Petites fleches pour reordonner une entree (liste ou separateur).
+  const moveButtons = (l) => {
+    const i = config.lists.indexOf(l);
+    const box = document.createElement('div');
+    box.className = 'sheet-actions';
+    const up = document.createElement('button');
+    up.className = 'action ghost';
+    up.textContent = '↑';
+    up.disabled = i <= 0;
+    up.onclick = () => {
+      if (i > 0) { const t = config.lists[i-1]; config.lists[i-1] = l; config.lists[i] = t; save(); renderSettings(); }
+    };
+    const down = document.createElement('button');
+    down.className = 'action ghost';
+    down.textContent = '↓';
+    down.disabled = i >= config.lists.length - 1;
+    down.onclick = () => {
+      if (i < config.lists.length - 1) { const t = config.lists[i+1]; config.lists[i+1] = l; config.lists[i] = t; save(); renderSettings(); }
+    };
+    box.append(up, down);
+    return box;
+  };
+
   for (const l of config.lists) {
     const block = document.createElement('div');
     block.className = 'list-edit';
+
+    // --- separateur "|" : bloc minimal ---
+    if (isSeparator(l)) {
+      const lab = document.createElement('div');
+      lab.className = 'subhead';
+      lab.style.margin = '4px 0 10px';
+      lab.textContent = 'Separateur  |';
+
+      const del = document.createElement('button');
+      del.className = 'action ghost';
+      del.textContent = 'Supprimer le separateur';
+      del.onclick = () => {
+        config.lists = config.lists.filter(x => x.id !== l.id);
+        save(); renderSettings();
+      };
+      const actions = document.createElement('div');
+      actions.className = 'sheet-actions';
+      actions.append(del);
+
+      block.append(lab, moveButtons(l), actions);
+      panel.append(block);
+      continue;
+    }
 
     const name = document.createElement('input');
     name.className = 'field';
@@ -570,7 +645,7 @@ function renderSettings() {
     actions.className = 'sheet-actions';
     actions.append(del);
 
-    block.append(name, swatches, sub, wrap, actions);
+    block.append(name, swatches, sub, wrap, moveButtons(l), actions);
     panel.append(block);
   }
 
@@ -588,7 +663,16 @@ function renderSettings() {
     save(); renderSettings();
   };
 
-  panel.append(add);
+  const addSep = document.createElement('button');
+  addSep.className = 'action ghost';
+  addSep.textContent = 'Ajouter un separateur  |';
+  addSep.style.marginTop = '8px';
+  addSep.onclick = () => {
+    config.lists.push({ id: 's' + Date.now(), name: '|', separator: true, members: [] });
+    save(); renderSettings();
+  };
+
+  panel.append(add, addSep);
   main.append(panel);
 }
 
