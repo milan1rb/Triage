@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import androidx.core.app.NotificationManagerCompat
 
@@ -27,6 +28,9 @@ class MainActivity : Activity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true   // necessaire pour localStorage
             addJavascriptInterface(Bridge(this@MainActivity), "AndroidBridge")
+            // Sans WebChromeClient, les dialogues JS (prompt/alert) sont ignores
+            // par la WebView : on active le comportement par defaut.
+            webChromeClient = WebChromeClient()
             loadUrl("file:///android_asset/index.html")
         }
         setContentView(web)

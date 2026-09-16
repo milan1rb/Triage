@@ -60,10 +60,42 @@
   .tab[aria-selected="true"] { color: var(--ink); font-weight: 550; }
 
   .count {
-    min-width: 19px; height: 19px; padding: 0 5px;
-    border-radius: 10px; font-size: 12px; font-weight: 600;
-    color: #fff; display: grid; place-items: center;
+    min-width: 19px; height: 19px; padding: 0 6px;
+    border-radius: 10px; font-size: 12px; font-weight: 700;
+    display: grid; place-items: center;
   }
+  .count.on  { background: #15181c; color: #fff; }      /* notification : noir */
+  .count.off { background: #e6e8ea; color: #9aa0a8; }   /* pas de notification : gris clair */
+
+  /* raccourci "ranger dans une liste" sur une ligne non-lue */
+  .add-btn {
+    flex: 0 0 auto; align-self: center;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--paper); color: var(--ink);
+    font-size: 24px; line-height: 1; display: grid; place-items: center;
+  }
+  .add-btn:active { background: #e6e8ea; }
+
+  /* feuille de choix "ranger dans une liste" */
+  .sheet-bg {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(0,0,0,.35);
+    display: flex; align-items: flex-end;
+  }
+  .sheet {
+    width: 100%; background: var(--surface);
+    border-radius: 16px 16px 0 0;
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+    max-height: 80vh; overflow: auto;
+  }
+  .sheet h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
+  .sheet .opt {
+    display: flex; align-items: center; gap: 11px;
+    width: 100%; text-align: left; padding: 13px 6px;
+    border-top: 1px solid var(--line); font-size: 16px;
+  }
+  .sheet .opt:active { background: #f7f8f9; }
+  .swatch-dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
 
   /* ---------- liste ---------- */
 
@@ -276,17 +308,18 @@ function render() {
   renderList();
 }
 
-function makeTab(id, label, count, color) {
+function makeTab(id, label, unread, total) {
   const btn = document.createElement('button');
   btn.className = 'tab';
   btn.role = 'tab';
   btn.setAttribute('aria-selected', active === id);
   btn.innerHTML = `<span>${escape(label)}</span>`;
-  if (count) {
+  if (total > 0) {
     const badge = document.createElement('span');
-    badge.className = 'count';
-    badge.style.background = color;
-    badge.textContent = count > 99 ? '99+' : count;
+    // Noir avec le nombre de non-lus s'il y en a ; sinon gris clair avec le total.
+    badge.className = 'count ' + (unread > 0 ? 'on' : 'off');
+    const n = unread > 0 ? unread : total;
+    badge.textContent = n > 99 ? '99+' : n;
     btn.append(badge);
   }
   btn.onclick = () => { active = id; render(); };
@@ -300,20 +333,22 @@ function renderTabs() {
   tabs.style.display = 'flex';
 
   const all = conversations();
-  const unread = all.filter(isUnread).length;
+  const unreadAll = all.filter(isUnread).length;
 
-  // Non lus (vue par defaut)
-  tabs.append(makeTab('unread', 'Non lus', unread, '#c0392b'));
+  // Non lus (vue par defaut) : pastille = nombre de non-lus
+  tabs.append(makeTab('unread', 'Non lus', unreadAll, unreadAll));
 
-  // Une liste editable par onglet
+  // Une liste editable par onglet : pastille = non-lus de la liste, sinon total en gris
   for (const l of config.lists) {
-    const n = all.filter(c => l.members.includes(c.conversation)).length;
-    tabs.append(makeTab(l.id, l.name, n, l.color));
+    const inList = all.filter(c => l.members.includes(c.conversation));
+    const unread = inList.filter(isUnread).length;
+    tabs.append(makeTab(l.id, l.name, unread, inList.length));
   }
 
   // A classer : contacts directs (tete-a-tete) pas encore ranges dans une liste
-  const unsorted = all.filter(c => !c.isGroup && !inAnyList(c.conversation)).length;
-  tabs.append(makeTab('unsorted', 'A classer', unsorted, '#767c85'));
+  const unsorted = all.filter(c => !c.isGroup && !inAnyList(c.conversation));
+  const unsortedUnread = unsorted.filter(isUnread).length;
+  tabs.append(makeTab('unsorted', 'A classer', unsortedUnread, unsorted.length));
 }
 
 function renderList() {
@@ -341,11 +376,11 @@ function renderList() {
 
   for (const c of rows) {
     const lst = primaryList(c.conversation);
-    const row = document.createElement('button');
+    const row = document.createElement('div');
     row.className = 'row' + (isUnread(c) ? ' unread' : '');
     if (lst) row.style.borderLeftColor = lst.color;
 
-    // Sur "Toutes" et "Non lus", on montre a quelle(s) liste(s) appartient la discussion.
+    // Dans "Non lus", on montre a quelle(s) liste(s) appartient la discussion.
     let tags = '';
     if (active === 'unread') {
       tags = listsOf(c.conversation)
@@ -353,25 +388,98 @@ function renderList() {
         .join(' ');
     }
 
-    row.innerHTML = `
-      <div class="row-main">
-        <div class="row-top">
-          <span class="name">${escape(c.conversation)}</span>
-          <span class="time">${clock(c.postTime)}</span>
-        </div>
-        <div class="preview">${escape(c.isGroup ? c.sender + ' : ' + c.text : c.text)}</div>
-        ${tags ? '<div>' + tags + '</div>' : ''}
-      </div>`;
+    const col = document.createElement('div');
+    col.className = 'row-main';
+    col.innerHTML = `
+      <div class="row-top">
+        <span class="name">${escape(c.conversation)}</span>
+        <span class="time">${clock(c.postTime)}</span>
+      </div>
+      <div class="preview">${escape(c.isGroup ? c.sender + ' : ' + c.text : c.text)}</div>
+      ${tags ? '<div>' + tags + '</div>' : ''}`;
+    col.onclick = () => open(c);
+    row.append(col);
 
-    if (isUnread(c)) {
+    // Raccourci : dans Non lus, ranger un contact non classe dans une liste.
+    if (active === 'unread' && !inAnyList(c.conversation)) {
+      const add = document.createElement('button');
+      add.className = 'add-btn';
+      add.textContent = '+';
+      add.setAttribute('aria-label', 'Ranger dans une liste');
+      add.onclick = (e) => { e.stopPropagation(); openAssignSheet(c.conversation); };
+      row.append(add);
+    } else if (isUnread(c)) {
       const dot = document.createElement('span');
       dot.className = 'dot';
       dot.style.background = lst ? lst.color : '#c0392b';
       row.append(dot);
     }
-    row.onclick = () => open(c);
+
     main.append(row);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Feuille : ranger une discussion dans une liste (raccourci)          */
+/* ------------------------------------------------------------------ */
+
+function openAssignSheet(name) {
+  const bg = document.createElement('div');
+  bg.className = 'sheet-bg';
+  bg.onclick = (e) => { if (e.target === bg) bg.remove(); };
+
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+
+  const h = document.createElement('h3');
+  h.textContent = 'Ranger ' + name + ' dans…';
+  sheet.append(h);
+
+  for (const l of config.lists) {
+    const already = l.members.includes(name);
+    const opt = document.createElement('button');
+    opt.className = 'opt';
+    opt.innerHTML =
+      `<span class="swatch-dot" style="background:${l.color}"></span>` +
+      `<span style="flex:1">${escape(l.name)}</span>` +
+      (already ? '&#10003;' : '');
+    opt.onclick = () => {
+      if (!l.members.includes(name)) l.members.push(name);
+      save(); bg.remove(); render();
+    };
+    sheet.append(opt);
+  }
+
+  const create = document.createElement('button');
+  create.className = 'opt';
+  create.innerHTML =
+    `<span class="swatch-dot" style="background:var(--ink)"></span>` +
+    `<span style="flex:1">Nouvelle liste…</span>`;
+  create.onclick = () => {
+    const nm = prompt('Nom de la nouvelle liste :');
+    if (nm && nm.trim()) {
+      config.lists.push({
+        id: 'f' + Date.now(),
+        name: nm.trim(),
+        color: COLORS[config.lists.length % COLORS.length],
+        members: [name]
+      });
+      save(); bg.remove(); render();
+    }
+  };
+  sheet.append(create);
+
+  const cancel = document.createElement('button');
+  cancel.className = 'opt';
+  cancel.style.color = 'var(--muted)';
+  cancel.innerHTML =
+    `<span class="swatch-dot" style="background:transparent"></span>` +
+    `<span style="flex:1">Annuler</span>`;
+  cancel.onclick = () => bg.remove();
+  sheet.append(cancel);
+
+  bg.append(sheet);
+  document.body.append(bg);
 }
 
 /* ------------------------------------------------------------------ */
