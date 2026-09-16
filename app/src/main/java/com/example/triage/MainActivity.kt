@@ -86,7 +86,8 @@ class MainActivity : Activity() {
             activity.runOnUiThread {
                 try {
                     val intent = if (digits.isNotEmpty()) {
-                        Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits"))
+                        // Deep link qui ouvre directement la conversation
+                        Intent(Intent.ACTION_VIEW, Uri.parse("whatsapp://send?phone=$digits"))
                             .setPackage("com.whatsapp")
                     } else {
                         activity.packageManager.getLaunchIntentForPackage("com.whatsapp")

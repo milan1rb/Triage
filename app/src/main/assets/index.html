@@ -379,7 +379,7 @@ function renderList() {
     av.className = 'avatar';
     av.style.background = avatarColor(c.conversation);
     av.textContent = initials(c.conversation);
-    av.onclick = () => open(c);
+    av.onclick = () => { if (c.isGroup) open(c); else openNumberSheet(c); };
 
     // Colonne centrale (cliquable)
     const col = document.createElement('div');
@@ -461,16 +461,23 @@ function openAssignSheet(name) {
     `<span class="swatch-dot" style="background:var(--ink)"></span>` +
     `<span style="flex:1">Nouvelle liste…</span>`;
   create.onclick = () => {
-    const nm = prompt('Nom de la nouvelle liste :');
-    if (nm && nm.trim()) {
-      config.lists.push({
-        id: 'f' + Date.now(),
-        name: nm.trim(),
-        color: COLORS[config.lists.length % COLORS.length],
-        members: [name]
-      });
-      save(); bg.remove(); render();
-    }
+    bg.remove();
+    inputSheet({
+      title: 'Nouvelle liste',
+      hint: 'Donne un nom a la liste (modifiable ensuite).',
+      confirm: 'Creer',
+      onConfirm: (v) => {
+        if (v && v.trim()) {
+          config.lists.push({
+            id: 'f' + Date.now(),
+            name: v.trim(),
+            color: COLORS[config.lists.length % COLORS.length],
+            members: [name]
+          });
+          save(); render();
+        }
+      }
+    });
   };
   sheet.append(create);
 
@@ -586,6 +593,84 @@ function renderSettings() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Feuille de saisie generique (numero, nom de liste…)                 */
+/* ------------------------------------------------------------------ */
+
+function inputSheet(opts) {
+  const bg = document.createElement('div');
+  bg.className = 'sheet-bg';
+  bg.onclick = (e) => { if (e.target === bg) bg.remove(); };
+
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+
+  const h = document.createElement('h3');
+  h.textContent = opts.title;
+  sheet.append(h);
+
+  if (opts.hint) {
+    const p = document.createElement('p');
+    p.style.cssText = 'margin:0 0 12px;color:var(--muted);font-size:14px';
+    p.textContent = opts.hint;
+    sheet.append(p);
+  }
+
+  const input = document.createElement('input');
+  input.className = 'field';
+  input.type = opts.type || 'text';
+  input.value = opts.value || '';
+  sheet.append(input);
+
+  const primary = document.createElement('button');
+  primary.className = 'action';
+  primary.style.width = '100%';
+  primary.textContent = opts.confirm || 'Valider';
+  primary.onclick = () => { const v = input.value; bg.remove(); opts.onConfirm(v); };
+  sheet.append(primary);
+
+  if (opts.secondary) {
+    const sec = document.createElement('button');
+    sec.className = 'action ghost';
+    sec.style.cssText = 'width:100%;margin-top:8px';
+    sec.textContent = opts.secondary.label;
+    sec.onclick = () => { bg.remove(); opts.secondary.onClick(); };
+    sheet.append(sec);
+  }
+
+  const cancel = document.createElement('button');
+  cancel.className = 'action ghost';
+  cancel.style.cssText = 'width:100%;margin-top:8px';
+  cancel.textContent = 'Annuler';
+  cancel.onclick = () => bg.remove();
+  sheet.append(cancel);
+
+  bg.append(sheet);
+  document.body.append(bg);
+  setTimeout(() => input.focus(), 60);
+}
+
+/* Saisie / modification du numero d'une personne, puis ouverture. */
+function openNumberSheet(c) {
+  const name = c.conversation;
+  inputSheet({
+    title: 'Numero de ' + name,
+    hint: "Format international sans + : par ex. 33612345678 (33 = France). A saisir une seule fois, il sera memorise.",
+    value: config.phones[name] || '',
+    type: 'tel',
+    confirm: 'Ouvrir la conversation',
+    onConfirm: (v) => {
+      const d = (v || '').replace(/\D/g, '');
+      if (d) { config.phones[name] = d; save(); }
+      Bridge.openChat(config.phones[name] || '');
+    },
+    secondary: {
+      label: 'Ouvrir WhatsApp sans numero',
+      onClick: () => Bridge.openChat('')
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /* Ouverture vers WhatsApp                                             */
 /* ------------------------------------------------------------------ */
 
@@ -594,20 +679,17 @@ function open(c) {
   save();
   render();
 
-  let phone = config.phones[c.conversation];
-  if (!phone && !c.isGroup) {
-    phone = prompt(
-      `Numero de ${c.conversation} pour ouvrir la conversation directement.\n` +
-      `Format international sans + : 33612345678.\n` +
-      `Laisse vide pour ouvrir simplement WhatsApp.`
-    );
-    if (phone) {
-      config.phones[c.conversation] = phone.replace(/\D/g, '');
-      save();
-    }
-  }
+  // Les groupes n'ont pas de lien direct : WhatsApp ne permet pas d'y entrer
+  // depuis une autre app. On ouvre donc WhatsApp simplement.
+  if (c.isGroup) { Bridge.openChat(''); return; }
 
-  Bridge.openChat(config.phones[c.conversation] || '');
+  // Contact direct : si le numero est connu, on ouvre la conversation ;
+  // sinon on le demande une fois via une saisie integree (fiable).
+  if (config.phones[c.conversation]) {
+    Bridge.openChat(config.phones[c.conversation]);
+  } else {
+    openNumberSheet(c);
+  }
 }
 
 /* ------------------------------------------------------------------ */
