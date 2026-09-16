@@ -189,7 +189,7 @@ const defaults = {
 
 const config = load();
 let messages = [];
-let active = config.defaultFolder;
+let active = 'all';
 let settingsOpen = false;
 
 function load() {
@@ -249,6 +249,22 @@ function renderTabs() {
 
   const all = conversations();
 
+  // Onglet "Toutes" : affiche l'ensemble des discussions, tous dossiers confondus.
+  const allTab = document.createElement('button');
+  allTab.className = 'tab';
+  allTab.role = 'tab';
+  allTab.setAttribute('aria-selected', active === 'all');
+  allTab.innerHTML = `<span>Toutes</span>`;
+  if (all.length) {
+    const badge = document.createElement('span');
+    badge.className = 'count';
+    badge.style.background = '#767c85';
+    badge.textContent = all.length > 99 ? '99+' : all.length;
+    allTab.append(badge);
+  }
+  allTab.onclick = () => { active = 'all'; render(); };
+  tabs.append(allTab);
+
   for (const f of config.folders) {
     const unread = all.filter(c => folderOf(c.conversation) === f.id && isUnread(c)).length;
     const btn = document.createElement('button');
@@ -287,7 +303,9 @@ function renderTabs() {
 function renderList() {
   const main = document.getElementById('main');
   const rows = conversations().filter(c =>
-    active === 'unsorted' ? !folderOf(c.conversation) : folderOf(c.conversation) === active
+    active === 'all' ? true :
+    active === 'unsorted' ? !folderOf(c.conversation) :
+    folderOf(c.conversation) === active
   );
 
   if (!rows.length) {
