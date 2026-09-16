@@ -6,176 +6,150 @@
 <title>Triage</title>
 <style>
   :root {
-    --paper: #f1f2f4;
-    --surface: #ffffff;
-    --ink: #15181c;
-    --muted: #767c85;
-    --line: #e1e4e8;
-    --radius: 10px;
+    --paper:#f0f2f5; --surface:#ffffff; --ink:#111b21; --muted:#667781;
+    --line:#e9edef; --chip:#eff2f5; --hover:#f5f6f6;
+    --green:#25d366; --green-deep:#008069; --green-soft:#d9fdd3;
+    --radius:10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#0b141a; --surface:#111b21; --ink:#e9edef; --muted:#8696a0;
+      --line:#222d34; --chip:#202c33; --hover:#182229;
+      --green:#00a884; --green-deep:#00a884; --green-soft:#103529;
+    }
   }
 
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
   body {
     margin: 0;
-    background: var(--paper);
+    background: var(--surface);
     color: var(--ink);
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 16px;
-    line-height: 1.45;
+    font-size: 16px; line-height: 1.4;
     padding-bottom: env(safe-area-inset-bottom);
   }
 
   button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
-  button:focus-visible, input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--green-deep); outline-offset: 2px; }
 
-  /* ---------- en-tete + onglets persistants ---------- */
-
+  /* ---------- en-tete + onglets ---------- */
   header {
     position: sticky; top: 0; z-index: 10;
     background: var(--surface);
     border-bottom: 1px solid var(--line);
     padding-top: env(safe-area-inset-top);
   }
-
   .bar {
-    display: flex; align-items: baseline; justify-content: space-between;
-    padding: 14px 16px 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px 8px;
   }
-  .bar h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
-  .bar button { font-size: 14px; color: var(--muted); }
+  .bar h1 { margin: 0; font-size: 21px; font-weight: 700; color: var(--green-deep); letter-spacing: -0.01em; }
+  .bar button { font-size: 14px; font-weight: 600; color: var(--green-deep); }
 
   .tabs {
-    display: flex; gap: 4px; overflow-x: auto; padding: 0 12px;
-    scrollbar-width: none;
+    display: flex; gap: 8px; overflow-x: auto;
+    padding: 4px 12px 10px; scrollbar-width: none;
   }
   .tabs::-webkit-scrollbar { display: none; }
 
   .tab {
-    flex: 0 0 auto; padding: 8px 10px 11px;
-    font-size: 15px; color: var(--muted);
-    border-bottom: 2px solid transparent;
-    display: flex; align-items: center; gap: 7px;
+    flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+    padding: 6px 13px; border-radius: 16px;
+    background: var(--chip); color: var(--muted); font-size: 14px;
   }
-  .tab[aria-selected="true"] { color: var(--ink); font-weight: 550; }
+  .tab[aria-selected="true"] { background: var(--green-soft); color: var(--green-deep); font-weight: 600; }
 
   .count {
-    min-width: 19px; height: 19px; padding: 0 6px;
-    border-radius: 10px; font-size: 12px; font-weight: 700;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    border-radius: 9px; font-size: 11px; font-weight: 700;
     display: grid; place-items: center;
   }
-  .count.on  { background: #15181c; color: #fff; }      /* notification : noir */
-  .count.off { background: #e6e8ea; color: #9aa0a8; }   /* pas de notification : gris clair */
+  .count.on  { background: var(--green); color: #fff; }
+  .count.off { background: transparent; color: var(--muted); border: 1px solid var(--line); }
 
-  /* raccourci "ranger dans une liste" sur une ligne non-lue */
-  .add-btn {
-    flex: 0 0 auto; align-self: center;
-    width: 34px; height: 34px; border-radius: 50%;
-    background: var(--paper); color: var(--ink);
-    font-size: 24px; line-height: 1; display: grid; place-items: center;
-  }
-  .add-btn:active { background: #e6e8ea; }
-
-  /* feuille de choix "ranger dans une liste" */
-  .sheet-bg {
-    position: fixed; inset: 0; z-index: 50;
-    background: rgba(0,0,0,.35);
-    display: flex; align-items: flex-end;
-  }
-  .sheet {
-    width: 100%; background: var(--surface);
-    border-radius: 16px 16px 0 0;
-    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
-    max-height: 80vh; overflow: auto;
-  }
-  .sheet h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
-  .sheet .opt {
-    display: flex; align-items: center; gap: 11px;
-    width: 100%; text-align: left; padding: 13px 6px;
-    border-top: 1px solid var(--line); font-size: 16px;
-  }
-  .sheet .opt:active { background: #f7f8f9; }
-  .swatch-dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
-
-  /* ---------- liste ---------- */
-
-  main { padding: 10px 12px 28px; }
+  /* ---------- liste facon WhatsApp ---------- */
+  main { padding: 0 0 90px; }
 
   .row {
-    display: flex; gap: 12px; align-items: flex-start;
+    display: flex; gap: 13px; align-items: center;
     width: 100%; text-align: left;
     background: var(--surface);
-    border-radius: var(--radius);
-    padding: 12px 14px;
-    margin-bottom: 7px;
-    border-left: 3px solid transparent;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
   }
-  .row:active { background: #f7f8f9; }
+  .row:active { background: var(--hover); }
+
+  .avatar {
+    width: 49px; height: 49px; border-radius: 50%; flex: 0 0 auto;
+    display: grid; place-items: center;
+    color: #fff; font-weight: 600; font-size: 18px;
+  }
 
   .row-main { flex: 1; min-width: 0; }
-  .row-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
-  .name { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .time { font-size: 12px; color: var(--muted); flex: 0 0 auto; }
+  .name {
+    font-weight: 500; font-size: 17px; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .unread .name { font-weight: 600; }
   .preview {
-    font-size: 14px; color: var(--muted); margin-top: 2px;
+    font-size: 14.5px; color: var(--muted); margin-top: 3px;
     display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
   }
-  .unread .name { font-weight: 650; }
-  .unread .preview { color: var(--ink); }
 
-  .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 8px; flex: 0 0 auto; }
+  .meta { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; flex: 0 0 auto; }
+  .time { font-size: 12px; color: var(--muted); }
+  .unread .time { color: var(--green); font-weight: 600; }
+
+  .badge-green {
+    min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+    background: var(--green); color: #fff; font-size: 12px; font-weight: 700;
+    display: grid; place-items: center;
+  }
+
+  .add-btn {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--chip); color: var(--green-deep);
+    font-size: 21px; line-height: 1; display: grid; place-items: center;
+  }
+  .add-btn:active { background: var(--line); }
 
   .tag {
     font-size: 11px; font-weight: 600; color: #fff;
-    padding: 1px 7px; border-radius: 9px; margin-top: 4px; display: inline-block;
+    padding: 1px 7px; border-radius: 9px; display: inline-block;
   }
 
   /* ---------- etats vides / reglages ---------- */
-
-  .panel {
-    background: var(--surface); border-radius: var(--radius);
-    padding: 20px 18px; margin: 12px;
-  }
+  .panel { background: var(--surface); border-radius: var(--radius); padding: 22px 18px; margin: 12px; }
   .panel h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
   .panel p { margin: 0 0 14px; color: var(--muted); font-size: 15px; }
 
-  .action {
-    background: var(--ink); color: var(--surface);
-    padding: 11px 16px; border-radius: 8px; font-weight: 550; font-size: 15px;
-  }
-  .action.ghost { background: var(--paper); color: var(--ink); }
+  .action { background: var(--green-deep); color: #fff; padding: 11px 16px; border-radius: 22px; font-weight: 600; font-size: 15px; }
+  .action.ghost { background: var(--chip); color: var(--ink); }
 
-  .field {
-    width: 100%; padding: 10px 12px; margin-bottom: 8px;
-    border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
-  }
+  .field { width: 100%; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
 
   .list-edit { border-top: 1px solid var(--line); padding: 16px 0 4px; }
   .list-edit:first-of-type { border-top: 0; }
   .swatches { display: flex; gap: 8px; margin: 10px 0 12px; }
   .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; }
   .swatch[aria-pressed="true"] { border-color: var(--ink); }
-  .hint { font-size: 13px; color: var(--muted); margin: -4px 0 10px; }
-
-  .sheet-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-
   .subhead { font-size: 13px; font-weight: 600; color: var(--muted); margin: 14px 0 2px; text-transform: uppercase; letter-spacing: .03em; }
 
   .pick-wrap { max-height: 42vh; overflow: auto; margin: 4px 0 8px; border: 1px solid var(--line); border-radius: 8px; }
-  .pick {
-    display: flex; align-items: center; gap: 11px;
-    width: 100%; text-align: left;
-    padding: 11px 12px; border-top: 1px solid var(--line);
-  }
+  .pick { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 11px 12px; border-top: 1px solid var(--line); }
   .pick:first-child { border-top: 0; }
-  .pick .box {
-    width: 22px; height: 22px; flex: 0 0 auto;
-    border: 2px solid var(--line); border-radius: 6px;
-    display: grid; place-items: center; font-size: 14px; color: #fff;
-  }
-  .pick[aria-pressed="true"] .box { background: var(--ink); border-color: var(--ink); }
+  .pick .box { width: 22px; height: 22px; flex: 0 0 auto; border: 2px solid var(--line); border-radius: 6px; display: grid; place-items: center; font-size: 14px; color: #fff; }
+  .pick[aria-pressed="true"] .box { background: var(--green-deep); border-color: var(--green-deep); }
   .pick .pname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
   .pick-empty { color: var(--muted); font-size: 14px; padding: 12px; }
+
+  .sheet-bg { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; }
+  .sheet { width: 100%; background: var(--surface); border-radius: 16px 16px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); max-height: 80vh; overflow: auto; }
+  .sheet h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
+  .sheet .opt { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 13px 6px; border-top: 1px solid var(--line); font-size: 16px; color: var(--ink); }
+  .sheet .opt:active { background: var(--hover); }
+  .swatch-dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
 </style>
 </head>
 <body>
@@ -297,6 +271,27 @@ function isUnread(c) {
   return c.postTime > (config.seen[c.conversation] || 0);
 }
 
+/* Nombre de messages non lus d'une conversation (pour la pastille verte). */
+function unreadCount(c) {
+  const s = config.seen[c.conversation] || 0;
+  return messages.filter(m => m.conversation === c.conversation && m.postTime > s).length;
+}
+
+/* Avatar : initiales + couleur derivee du nom. */
+const AVATAR_COLORS = ['#e17076','#7bc862','#65aadd','#a695e7','#ee7aae','#6ec9cb','#f2a25c','#d98c8c'];
+function initials(name) {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  let s = parts[0][0] || '';
+  if (parts.length > 1) s += parts[1][0] || '';
+  return s.toUpperCase();
+}
+function avatarColor(name) {
+  let h = 0;
+  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
 /* ------------------------------------------------------------------ */
 /* Rendu                                                               */
 /* ------------------------------------------------------------------ */
@@ -375,46 +370,56 @@ function renderList() {
   }
 
   for (const c of rows) {
-    const lst = primaryList(c.conversation);
+    const unread = isUnread(c);
     const row = document.createElement('div');
-    row.className = 'row' + (isUnread(c) ? ' unread' : '');
-    if (lst) row.style.borderLeftColor = lst.color;
+    row.className = 'row' + (unread ? ' unread' : '');
 
-    // Dans "Non lus", on montre a quelle(s) liste(s) appartient la discussion.
+    // Avatar rond avec initiales
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.style.background = avatarColor(c.conversation);
+    av.textContent = initials(c.conversation);
+    av.onclick = () => open(c);
+
+    // Colonne centrale (cliquable)
+    const col = document.createElement('div');
+    col.className = 'row-main';
     let tags = '';
     if (active === 'unread') {
       tags = listsOf(c.conversation)
         .map(l => `<span class="tag" style="background:${l.color}">${escape(l.name)}</span>`)
         .join(' ');
     }
-
-    const col = document.createElement('div');
-    col.className = 'row-main';
     col.innerHTML = `
-      <div class="row-top">
-        <span class="name">${escape(c.conversation)}</span>
-        <span class="time">${clock(c.postTime)}</span>
-      </div>
+      <div class="name">${escape(c.conversation)}</div>
       <div class="preview">${escape(c.isGroup ? c.sender + ' : ' + c.text : c.text)}</div>
-      ${tags ? '<div>' + tags + '</div>' : ''}`;
+      ${tags ? '<div style="margin-top:5px">' + tags + '</div>' : ''}`;
     col.onclick = () => open(c);
-    row.append(col);
 
-    // Raccourci : dans Non lus, ranger un contact non classe dans une liste.
+    // Colonne de droite : heure + pastille verte OU bouton "+"
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const time = document.createElement('div');
+    time.className = 'time';
+    time.textContent = clock(c.postTime);
+    meta.append(time);
+
     if (active === 'unread' && !inAnyList(c.conversation)) {
       const add = document.createElement('button');
       add.className = 'add-btn';
       add.textContent = '+';
       add.setAttribute('aria-label', 'Ranger dans une liste');
       add.onclick = (e) => { e.stopPropagation(); openAssignSheet(c.conversation); };
-      row.append(add);
-    } else if (isUnread(c)) {
-      const dot = document.createElement('span');
-      dot.className = 'dot';
-      dot.style.background = lst ? lst.color : '#c0392b';
-      row.append(dot);
+      meta.append(add);
+    } else if (unread) {
+      const n = unreadCount(c) || 1;
+      const badge = document.createElement('div');
+      badge.className = 'badge-green';
+      badge.textContent = n > 99 ? '99+' : n;
+      meta.append(badge);
     }
 
+    row.append(av, col, meta);
     main.append(row);
   }
 }
