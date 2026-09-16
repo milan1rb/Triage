@@ -201,10 +201,7 @@ function demoBridge() {
 const COLORS = ['#2f6fed', '#0f8a5f', '#b4471f', '#7b4bc4', '#0f7b8a', '#9c6b1f'];
 
 const defaults = {
-  lists: [
-    { id: 'f1', name: 'Prospection', color: COLORS[2], members: [] },
-    { id: 'f2', name: 'Perso',       color: COLORS[0], members: [] }
-  ],
+  lists: [],
   seen: {},   // conversation -> timestamp du dernier message consulte
   phones: {}  // conversation -> numero international
 };
@@ -305,9 +302,8 @@ function renderTabs() {
   const all = conversations();
   const unread = all.filter(isUnread).length;
 
-  // Non lus (vue par defaut) + Toutes
+  // Non lus (vue par defaut)
   tabs.append(makeTab('unread', 'Non lus', unread, '#c0392b'));
-  tabs.append(makeTab('all', 'Toutes', all.length, '#767c85'));
 
   // Une liste editable par onglet
   for (const l of config.lists) {
@@ -315,8 +311,8 @@ function renderTabs() {
     tabs.append(makeTab(l.id, l.name, n, l.color));
   }
 
-  // A classer : dans aucune liste
-  const unsorted = all.filter(c => !inAnyList(c.conversation)).length;
+  // A classer : contacts directs (tete-a-tete) pas encore ranges dans une liste
+  const unsorted = all.filter(c => !c.isGroup && !inAnyList(c.conversation)).length;
   tabs.append(makeTab('unsorted', 'A classer', unsorted, '#767c85'));
 }
 
@@ -325,16 +321,20 @@ function renderList() {
   const all = conversations();
   const rows = all.filter(c => {
     if (active === 'unread')   return isUnread(c);
-    if (active === 'all')      return true;
-    if (active === 'unsorted') return !inAnyList(c.conversation);
+    if (active === 'unsorted') return !c.isGroup && !inAnyList(c.conversation);
     const l = config.lists.find(x => x.id === active);
     return l ? l.members.includes(c.conversation) : false;
   });
 
   if (!rows.length) {
-    const msg = active === 'unread'
-      ? "Aucun message non lu. Les nouvelles discussions apparaitront ici des qu'un message arrive."
-      : "Rien ici pour l'instant. Ajoute des discussions a cette liste depuis le bouton Listes.";
+    let msg;
+    if (active === 'unread') {
+      msg = "Aucun message non lu. Une discussion revient ici des qu'un nouveau message arrive, et disparait une fois lue.";
+    } else if (active === 'unsorted') {
+      msg = "Aucun contact direct pour l'instant. Un contact s'ajoute ici des qu'il t'ecrit ; range-le ensuite dans une liste.";
+    } else {
+      msg = "Rien ici pour l'instant. Ajoute des discussions a cette liste depuis le bouton Listes.";
+    }
     main.innerHTML = `<div class="panel"><h2>Rien a afficher</h2><p>${msg}</p></div>`;
     return;
   }
@@ -347,7 +347,7 @@ function renderList() {
 
     // Sur "Toutes" et "Non lus", on montre a quelle(s) liste(s) appartient la discussion.
     let tags = '';
-    if (active === 'all' || active === 'unread') {
+    if (active === 'unread') {
       tags = listsOf(c.conversation)
         .map(l => `<span class="tag" style="background:${l.color}">${escape(l.name)}</span>`)
         .join(' ');
