@@ -1272,6 +1272,15 @@ function open(c) {
 
 function refresh() {
   messages = Bridge.getMessages() || [];
+  // Numeros eventuellement transmis par la notification : on les memorise.
+  let changed = false;
+  for (const m of messages) {
+    if (m.phone && !m.isGroup && !config.phones[m.conversation]) {
+      const d = String(m.phone).replace(/\D/g, '');
+      if (d) { config.phones[m.conversation] = d; changed = true; }
+    }
+  }
+  if (changed) save();
   render();
 }
 

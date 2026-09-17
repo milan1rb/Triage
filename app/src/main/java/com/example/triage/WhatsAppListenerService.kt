@@ -2,6 +2,7 @@ package com.example.triage
 
 import android.app.Notification
 import android.content.Context
+import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import org.json.JSONArray
@@ -79,6 +80,20 @@ class WhatsAppListenerService : NotificationListenerService() {
             }
         }
 
+        // Tentative (non garantie) de recuperer le numero : WhatsApp met parfois
+        // un identifiant de conversation du type "336...@s.whatsapp.net".
+        var phone = ""
+        try {
+            val candidates = mutableListOf<String?>()
+            if (Build.VERSION.SDK_INT >= 26) candidates.add(notification.shortcutId)
+            if (Build.VERSION.SDK_INT >= 29) candidates.add(notification.locusId?.id)
+            for (cand in candidates) {
+                if (cand == null) continue
+                val match = Regex("(\\d{6,15})@s\\.whatsapp\\.net").find(cand)
+                if (match != null) { phone = match.groupValues[1]; break }
+            }
+        } catch (e: Exception) {}
+
         val message = JSONObject().apply {
             put("id", "${sbn.postTime}-${conversation.hashCode()}")
             put("conversation", conversation)
@@ -86,6 +101,7 @@ class WhatsAppListenerService : NotificationListenerService() {
             put("text", text)
             put("isGroup", isGroup)
             put("postTime", sbn.postTime)
+            put("phone", phone)
             put("business", sbn.packageName == "com.whatsapp.w4b")
         }
 
