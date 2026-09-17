@@ -198,7 +198,11 @@ const Bridge = window.AndroidBridge ? {
   openSettings:  () => AndroidBridge.openSettings(),
   getMessages:   () => JSON.parse(AndroidBridge.getMessages() || '[]'),
   clearMessages: () => AndroidBridge.clearMessages(),
-  openChat:      p  => AndroidBridge.openChat(p || '')
+  openChat:      p  => AndroidBridge.openChat(p || ''),
+  overlayAllowed:() => AndroidBridge.overlayAllowed(),
+  requestOverlay:() => AndroidBridge.requestOverlay(),
+  showBubble:    () => AndroidBridge.showBubble(),
+  hideBubble:    () => AndroidBridge.hideBubble()
 } : demoBridge();
 
 function demoBridge() {
@@ -216,7 +220,11 @@ function demoBridge() {
     openSettings:  () => {},
     getMessages:   () => messages,
     clearMessages: () => { messages.length = 0; },
-    openChat:      p  => alert(p ? 'Ouvrirait WhatsApp sur ' + p : 'Ouvrirait WhatsApp')
+    openChat:      p  => alert(p ? 'Ouvrirait WhatsApp sur ' + p : 'Ouvrirait WhatsApp'),
+    overlayAllowed:() => false,
+    requestOverlay:() => alert("Autoriser l'affichage par-dessus les autres apps"),
+    showBubble:    () => {},
+    hideBubble:    () => {}
   };
 }
 
@@ -229,6 +237,7 @@ const COLORS = ['#2f6fed', '#0f8a5f', '#b4471f', '#7b4bc4', '#0f7b8a', '#9c6b1f'
 const defaults = {
   lists: [],
   manual: [], // contacts epingles manuellement (nom + note), toujours affiches
+  bubble: true, // bulle de retour rapide par-dessus WhatsApp
   seen: {},   // conversation -> timestamp du dernier message consulte
   phones: {}  // conversation -> numero international
 };
@@ -608,6 +617,54 @@ function renderSettings() {
   pinBtns.append(addC, addMe);
   panel.append(pinBtns);
 
+  /* --- Retour rapide (bulle flottante) --- */
+  const bHead = document.createElement('div');
+  bHead.className = 'subhead';
+  bHead.style.marginTop = '20px';
+  bHead.textContent = 'Retour rapide';
+  panel.append(bHead);
+
+  const bNote = document.createElement('p');
+  bNote.style.cssText = 'margin:2px 0 8px;color:var(--muted);font-size:14px';
+  bNote.textContent = "Affiche une bulle par-dessus WhatsApp pour revenir a Triage en un tap. Necessite l'autorisation « Afficher au-dessus des autres apps ».";
+  panel.append(bNote);
+
+  const bOn = config.bubble !== false;
+  const allowed = Bridge.overlayAllowed ? Bridge.overlayAllowed() : false;
+
+  const bBtns = document.createElement('div');
+  bBtns.className = 'sheet-actions';
+
+  const bToggle = document.createElement('button');
+  bToggle.className = bOn ? 'action' : 'action ghost';
+  bToggle.textContent = bOn ? 'Bulle activee' : 'Activer la bulle';
+  bToggle.onclick = () => {
+    config.bubble = !bOn;
+    save();
+    if (config.bubble && Bridge.overlayAllowed && !Bridge.overlayAllowed() && Bridge.requestOverlay) {
+      Bridge.requestOverlay();
+    }
+    if (!config.bubble && Bridge.hideBubble) { try { Bridge.hideBubble(); } catch (e) {} }
+    renderSettings();
+  };
+  bBtns.append(bToggle);
+
+  if (bOn && !allowed) {
+    const grant = document.createElement('button');
+    grant.className = 'action ghost';
+    grant.textContent = 'Accorder l\'autorisation';
+    grant.onclick = () => { if (Bridge.requestOverlay) Bridge.requestOverlay(); };
+    bBtns.append(grant);
+  }
+  panel.append(bBtns);
+
+  if (bOn && !allowed) {
+    const warn = document.createElement('p');
+    warn.style.cssText = 'margin:8px 0 0;color:#c0392b;font-size:13px';
+    warn.textContent = "Autorisation manquante : la bulle ne s'affichera pas tant qu'elle n'est pas accordee.";
+    panel.append(warn);
+  }
+
   /* --- Listes --- */
   const listHead = document.createElement('div');
   listHead.className = 'subhead';
@@ -900,6 +957,14 @@ function inputSheet(opts) {
   setTimeout(() => input.focus(), 60);
 }
 
+/* Affiche la bulle de retour (si activee) puis ouvre WhatsApp. */
+function launchChat(phone) {
+  if (config.bubble !== false && Bridge.showBubble) {
+    try { Bridge.showBubble(); } catch (e) {}
+  }
+  Bridge.openChat(phone || '');
+}
+
 /* Saisie / modification du numero d'une personne, puis ouverture. */
 function openNumberSheet(c) {
   const name = c.conversation;
@@ -912,11 +977,11 @@ function openNumberSheet(c) {
     onConfirm: (v) => {
       const d = (v || '').replace(/\D/g, '');
       if (d) { config.phones[name] = d; save(); }
-      Bridge.openChat(config.phones[name] || '');
+      launchChat(config.phones[name] || '');
     },
     secondary: {
       label: 'Ouvrir WhatsApp sans numero',
-      onClick: () => Bridge.openChat('')
+      onClick: () => launchChat('')
     }
   });
 }
@@ -932,12 +997,12 @@ function open(c) {
 
   // Les groupes n'ont pas de lien direct : WhatsApp ne permet pas d'y entrer
   // depuis une autre app. On ouvre donc WhatsApp simplement.
-  if (c.isGroup) { Bridge.openChat(''); return; }
+  if (c.isGroup) { launchChat(''); return; }
 
   // Contact direct : si le numero est connu, on ouvre la conversation ;
   // sinon on le demande une fois via une saisie integree (fiable).
   if (config.phones[c.conversation]) {
-    Bridge.openChat(config.phones[c.conversation]);
+    launchChat(config.phones[c.conversation]);
   } else {
     openNumberSheet(c);
   }
@@ -954,6 +1019,7 @@ function refresh() {
 
 /* Appelee par MainActivity.onResume(), au retour depuis WhatsApp. */
 window.onAppResume = function () {
+  if (Bridge.hideBubble) { try { Bridge.hideBubble(); } catch (e) {} }
   if (Bridge.isEnabled()) refresh();
 };
 

@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Bulle flottante de retour vers Triage par-dessus WhatsApp. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- Sans ce bloc, Android 11+ empeche l'app de voir WhatsApp. -->
     <queries>
         <package android:name="com.whatsapp" />

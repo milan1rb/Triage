@@ -38,7 +38,9 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // Au retour depuis WhatsApp, on redemande la liste a jour.
+        // De retour dans Triage : on retire la bulle...
+        Bubble.hide(this)
+        // ...et on redemande la liste a jour.
         if (::web.isInitialized) {
             web.evaluateJavascript("window.onAppResume && window.onAppResume()", null)
         }
@@ -71,6 +73,31 @@ class MainActivity : Activity() {
         fun clearMessages() {
             WhatsAppListenerService.clearMessages(activity)
         }
+
+        /** La bulle flottante est-elle autorisee (permission overlay) ? */
+        @JavascriptInterface
+        fun overlayAllowed(): Boolean = Settings.canDrawOverlays(activity)
+
+        /** Ouvre les reglages systeme pour accorder l'autorisation overlay. */
+        @JavascriptInterface
+        fun requestOverlay() {
+            activity.runOnUiThread {
+                try {
+                    activity.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:" + activity.packageName)
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (e: Exception) {}
+            }
+        }
+
+        @JavascriptInterface
+        fun showBubble() { activity.runOnUiThread { Bubble.show(activity) } }
+
+        @JavascriptInterface
+        fun hideBubble() { activity.runOnUiThread { Bubble.hide(activity) } }
 
         /**
          * Ouvre une conversation dans le vrai WhatsApp.
