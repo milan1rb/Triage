@@ -4,6 +4,9 @@
     <!-- Bulle flottante de retour vers Triage par-dessus WhatsApp. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- Facultatif : retrouver le numero d'un contact par son nom (liaison au repertoire). -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
     <!-- Sans ce bloc, Android 11+ empeche l'app de voir WhatsApp. -->
     <queries>
         <package android:name="com.whatsapp" />

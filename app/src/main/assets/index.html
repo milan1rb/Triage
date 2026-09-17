@@ -58,6 +58,22 @@
     padding: 6px 13px; border-radius: 16px;
     background: var(--chip); color: var(--muted); font-size: 14px;
   }
+  .bar-actions { display: flex; align-items: center; gap: 6px; }
+  #sort-btn { font-size: 20px; color: var(--green-deep); padding: 2px 8px; }
+  #sort-btn.active { background: var(--green-soft); border-radius: 14px; }
+  .search-wrap { padding: 2px 12px 8px; }
+  #search {
+    width: 100%; padding: 9px 14px; border-radius: 20px;
+    border: 0; background: var(--chip); color: var(--ink); font-size: 15px;
+  }
+  #search::placeholder { color: var(--muted); }
+  .sub-list { font-size: 12px; font-style: italic; color: var(--muted); margin-top: 2px; }
+  .section-head {
+    font-size: 12px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em;
+    padding: 12px 14px 4px; background: var(--surface);
+  }
+  .mute-ico { font-size: 13px; color: var(--muted); }
   .tab[aria-selected="true"] { background: var(--green-soft); color: var(--green-deep); font-weight: 600; }
   .tab-sep { flex: 0 0 auto; align-self: center; color: var(--muted); opacity: .5; font-weight: 700; font-size: 18px; padding: 0 1px; user-select: none; }
 
@@ -78,6 +94,7 @@
     background: var(--surface);
     padding: 9px 14px;
     border-bottom: 1px solid var(--line);
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
   .row:active { background: var(--hover); }
 
@@ -177,7 +194,13 @@
 <header>
   <div class="bar">
     <h1 id="screen-title">Triage</h1>
-    <button id="toggle-settings">Listes</button>
+    <div class="bar-actions">
+      <button id="sort-btn" aria-label="Trier">&#8645;</button>
+      <button id="toggle-settings">Listes</button>
+    </div>
+  </div>
+  <div class="search-wrap" id="search-wrap">
+    <input id="search" type="search" placeholder="Rechercher un contact" autocomplete="off" />
   </div>
   <div class="tabs" id="tabs" role="tablist"></div>
 </header>
@@ -202,7 +225,10 @@ const Bridge = window.AndroidBridge ? {
   overlayAllowed:() => AndroidBridge.overlayAllowed(),
   requestOverlay:() => AndroidBridge.requestOverlay(),
   showBubble:    () => AndroidBridge.showBubble(),
-  hideBubble:    () => AndroidBridge.hideBubble()
+  hideBubble:    () => AndroidBridge.hideBubble(),
+  contactsAllowed:() => AndroidBridge.contactsAllowed(),
+  requestContacts:() => AndroidBridge.requestContacts(),
+  lookupNumber:  n  => AndroidBridge.lookupNumber(n || '')
 } : demoBridge();
 
 function demoBridge() {
@@ -224,7 +250,10 @@ function demoBridge() {
     overlayAllowed:() => false,
     requestOverlay:() => alert("Autoriser l'affichage par-dessus les autres apps"),
     showBubble:    () => {},
-    hideBubble:    () => {}
+    hideBubble:    () => {},
+    contactsAllowed:() => false,
+    requestContacts:() => alert("Autoriser l'acces aux contacts"),
+    lookupNumber:  () => ''
   };
 }
 
@@ -236,16 +265,22 @@ const COLORS = ['#2f6fed', '#0f8a5f', '#b4471f', '#7b4bc4', '#0f7b8a', '#9c6b1f'
 
 const defaults = {
   lists: [],
-  manual: [], // contacts epingles manuellement (nom + note), toujours affiches
-  bubble: true, // bulle de retour rapide par-dessus WhatsApp
-  seen: {},   // conversation -> timestamp du dernier message consulte
-  phones: {}  // conversation -> numero international
+  manual: [],       // contacts epingles manuellement
+  muted: [],        // contacts en sourdine (captes mais sans ping/non-lu)
+  bubble: true,     // bulle de retour rapide
+  useContacts: false, // liaison au repertoire pour trouver les numeros
+  showUnread: true, // afficher l'onglet Non lus
+  sort: 'recent',   // recent | oldest | unread | az
+  splitGroups: false, // separer groupes et contacts
+  seen: {},
+  phones: {}
 };
 
 const config = load();
 let messages = [];
 let active = 'unread';      // on arrive toujours sur les non-lus
 let settingsOpen = false;
+let searchQuery = '';
 
 function load() {
   let saved = {};
@@ -266,6 +301,8 @@ function load() {
   cfg.seen = cfg.seen || {};
   cfg.phones = cfg.phones || {};
   cfg.manual = Array.isArray(cfg.manual) ? cfg.manual : [];
+  cfg.muted = Array.isArray(cfg.muted) ? cfg.muted : [];
+  if (!cfg.sort) cfg.sort = 'recent';
   return cfg;
 }
 function save() {
@@ -316,7 +353,10 @@ function inAnyList(name) {
   return config.lists.some(l => !isSeparator(l) && l.members.includes(name));
 }
 
+function isMuted(name) { return (config.muted || []).includes(name); }
+
 function isUnread(c) {
+  if (isMuted(c.conversation)) return false; // sourdine : capte mais pas de ping/non-lu
   return c.postTime > (config.seen[c.conversation] || 0);
 }
 
@@ -345,17 +385,27 @@ function avatarColor(name) {
 /* Rendu                                                               */
 /* ------------------------------------------------------------------ */
 
+function firstTab() {
+  if (config.showUnread !== false) return 'unread';
+  const l = config.lists.find(x => !isSeparator(x));
+  if (l) return l.id;
+  return 'unsorted';
+}
+
 function normalizeActive() {
-  if (active === 'unread') return;
+  if (active === 'unread') {
+    if (config.showUnread === false) active = firstTab();
+    return;
+  }
   const all = conversations();
   if (active === 'unsorted') {
     const has = all.some(c => !c.isGroup && !inAnyList(c.conversation));
-    if (!has) active = 'unread';
+    if (!has) active = firstTab();
     return;
   }
   // Un onglet de liste doit exister et ne pas etre un separateur.
   const l = config.lists.find(x => x.id === active && !isSeparator(x));
-  if (!l) active = 'unread';
+  if (!l) active = firstTab();
 }
 
 function render() {
@@ -386,14 +436,25 @@ function makeTab(id, label, unread, total) {
 function renderTabs() {
   const tabs = document.getElementById('tabs');
   tabs.innerHTML = '';
-  if (settingsOpen) { tabs.style.display = 'none'; return; }
+  const sw = document.getElementById('search-wrap');
+  const sb = document.getElementById('sort-btn');
+  if (settingsOpen) {
+    tabs.style.display = 'none';
+    if (sw) sw.style.display = 'none';
+    if (sb) sb.style.display = 'none';
+    return;
+  }
   tabs.style.display = 'flex';
+  if (sw) sw.style.display = 'block';
+  if (sb) { sb.style.display = ''; sb.className = (config.sort !== 'recent' || config.splitGroups) ? 'active' : ''; }
 
   const all = conversations();
   const unreadAll = all.filter(isUnread).length;
 
-  // Non lus (vue par defaut) : pastille = nombre de non-lus
-  tabs.append(makeTab('unread', 'Non lus', unreadAll, unreadAll));
+  // Non lus (optionnel)
+  if (config.showUnread !== false) {
+    tabs.append(makeTab('unread', 'Non lus', unreadAll, unreadAll));
+  }
 
   // Listes editables et separateurs "|"
   for (const l of config.lists) {
@@ -418,10 +479,160 @@ function renderTabs() {
   }
 }
 
+function sortRows(rows) {
+  const s = config.sort || 'recent';
+  const arr = rows.slice();
+  if (s === 'az') arr.sort((a, b) => a.conversation.localeCompare(b.conversation, 'fr'));
+  else if (s === 'oldest') arr.sort((a, b) => a.postTime - b.postTime);
+  else if (s === 'unread') arr.sort((a, b) => (isUnread(b) ? 1 : 0) - (isUnread(a) ? 1 : 0) || b.postTime - a.postTime);
+  else arr.sort((a, b) => b.postTime - a.postTime);
+  return arr;
+}
+
+/* Appui long sur une ligne -> menu contextuel, sans declencher l'ouverture. */
+function attachLongPress(el, cb) {
+  let timer = null, longFired = false, sx = 0, sy = 0;
+  el.addEventListener('pointerdown', (e) => {
+    longFired = false; sx = e.clientX; sy = e.clientY;
+    timer = setTimeout(() => { longFired = true; cb(); }, 500);
+  });
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  el.addEventListener('pointermove', (e) => {
+    if (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10) cancel();
+  });
+  el.addEventListener('pointerup', cancel);
+  el.addEventListener('pointercancel', cancel);
+  el.addEventListener('pointerleave', cancel);
+  el.addEventListener('click', (e) => {
+    if (longFired) { e.stopPropagation(); e.preventDefault(); longFired = false; }
+  }, true);
+}
+
+/* Menu contextuel d'une discussion (appui long). */
+function openRowMenu(c) {
+  const name = c.conversation;
+  const bg = document.createElement('div');
+  bg.className = 'sheet-bg';
+  bg.onclick = (e) => { if (e.target === bg) bg.remove(); };
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  const h = document.createElement('h3');
+  h.textContent = name;
+  sheet.append(h);
+
+  const opt = (label, fn) => {
+    const b = document.createElement('button');
+    b.className = 'opt';
+    b.innerHTML = `<span style="flex:1">${escape(label)}</span>`;
+    b.onclick = () => { bg.remove(); fn(); };
+    sheet.append(b);
+  };
+
+  opt('Ouvrir la conversation', () => open(c));
+  opt(isMuted(name) ? 'Reactiver les notifications' : 'Mettre en sourdine', () => {
+    if (isMuted(name)) config.muted = config.muted.filter(n => n !== name);
+    else config.muted.push(name);
+    save(); render();
+  });
+  opt('Ranger dans une liste', () => openAssignSheet(name));
+
+  const cancel = document.createElement('button');
+  cancel.className = 'opt';
+  cancel.style.color = 'var(--muted)';
+  cancel.innerHTML = `<span style="flex:1">Annuler</span>`;
+  cancel.onclick = () => bg.remove();
+  sheet.append(cancel);
+
+  bg.append(sheet);
+  document.body.append(bg);
+}
+
+/* Construit une ligne de discussion. opts.mode 'search' affiche la liste en gris. */
+function buildRow(c, opts) {
+  opts = opts || {};
+  const unread = isUnread(c);
+  const muted = isMuted(c.conversation);
+  const row = document.createElement('div');
+  row.className = 'row' + (unread ? ' unread' : '');
+
+  const av = document.createElement('div');
+  av.className = 'avatar';
+  av.style.background = avatarColor(c.conversation);
+  av.textContent = initials(c.conversation);
+  av.onclick = () => { if (c.isGroup) open(c); else openNumberSheet(c); };
+
+  const col = document.createElement('div');
+  col.className = 'row-main';
+
+  const nameLine = escape(c.conversation) + (muted ? ' <span class="mute-ico">&#128263;</span>' : '');
+
+  let extra = '';
+  if (opts.mode === 'search') {
+    const ls = listsOf(c.conversation).map(l => l.name);
+    const label = c.isGroup ? 'Groupe' : (ls.length ? ls.join(', ') : 'A classer');
+    extra = `<div class="sub-list">${escape(label)}</div>`;
+  } else if (active === 'unread') {
+    const tags = listsOf(c.conversation).map(l => `<span class="tag">${escape(l.name)}</span>`).join(' ');
+    if (tags) extra = `<div style="margin-top:5px">${tags}</div>`;
+  }
+
+  col.innerHTML = `
+    <div class="name">${nameLine}</div>
+    <div class="preview">${escape(c.isGroup ? c.sender + ' : ' + c.text : c.text)}</div>
+    ${extra}`;
+  col.onclick = () => open(c);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const time = document.createElement('div');
+  time.className = 'time';
+  time.textContent = c.postTime ? clock(c.postTime) : '';
+  meta.append(time);
+
+  if (opts.mode !== 'search' && active === 'unread' && !inAnyList(c.conversation)) {
+    const add = document.createElement('button');
+    add.className = 'add-btn';
+    add.textContent = '+';
+    add.setAttribute('aria-label', 'Ranger dans une liste');
+    add.onclick = (e) => { e.stopPropagation(); openAssignSheet(c.conversation); };
+    meta.append(add);
+  } else if (unread) {
+    const n = unreadCount(c) || 1;
+    const badge = document.createElement('div');
+    badge.className = 'badge-green';
+    badge.textContent = n > 99 ? '99+' : n;
+    meta.append(badge);
+  }
+
+  row.append(av, col, meta);
+  attachLongPress(row, () => openRowMenu(c));
+  return row;
+}
+
+function addSection(main, label) {
+  const h = document.createElement('div');
+  h.className = 'section-head';
+  h.textContent = label;
+  main.append(h);
+}
+
 function renderList() {
   const main = document.getElementById('main');
   const all = conversations();
-  const rows = all.filter(c => {
+
+  // Mode recherche : filtre global sur le nom.
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    const found = sortRows(all.filter(c => c.conversation.toLowerCase().includes(q)));
+    if (!found.length) {
+      main.innerHTML = `<div class="panel"><h2>Aucun resultat</h2><p>Aucun contact ne correspond a « ${escape(searchQuery)} ».</p></div>`;
+      return;
+    }
+    for (const c of found) main.append(buildRow(c, { mode: 'search' }));
+    return;
+  }
+
+  let rows = all.filter(c => {
     if (active === 'unread')   return isUnread(c);
     if (active === 'unsorted') return !c.isGroup && !inAnyList(c.conversation);
     const l = config.lists.find(x => x.id === active);
@@ -441,59 +652,59 @@ function renderList() {
     return;
   }
 
-  for (const c of rows) {
-    const unread = isUnread(c);
-    const row = document.createElement('div');
-    row.className = 'row' + (unread ? ' unread' : '');
+  rows = sortRows(rows);
 
-    // Avatar rond avec initiales
-    const av = document.createElement('div');
-    av.className = 'avatar';
-    av.style.background = avatarColor(c.conversation);
-    av.textContent = initials(c.conversation);
-    av.onclick = () => { if (c.isGroup) open(c); else openNumberSheet(c); };
-
-    // Colonne centrale (cliquable)
-    const col = document.createElement('div');
-    col.className = 'row-main';
-    let tags = '';
-    if (active === 'unread') {
-      tags = listsOf(c.conversation)
-        .map(l => `<span class="tag">${escape(l.name)}</span>`)
-        .join(' ');
-    }
-    col.innerHTML = `
-      <div class="name">${escape(c.conversation)}</div>
-      <div class="preview">${escape(c.isGroup ? c.sender + ' : ' + c.text : c.text)}</div>
-      ${tags ? '<div style="margin-top:5px">' + tags + '</div>' : ''}`;
-    col.onclick = () => open(c);
-
-    // Colonne de droite : heure + pastille verte OU bouton "+"
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    const time = document.createElement('div');
-    time.className = 'time';
-    time.textContent = c.postTime ? clock(c.postTime) : '';
-    meta.append(time);
-
-    if (active === 'unread' && !inAnyList(c.conversation)) {
-      const add = document.createElement('button');
-      add.className = 'add-btn';
-      add.textContent = '+';
-      add.setAttribute('aria-label', 'Ranger dans une liste');
-      add.onclick = (e) => { e.stopPropagation(); openAssignSheet(c.conversation); };
-      meta.append(add);
-    } else if (unread) {
-      const n = unreadCount(c) || 1;
-      const badge = document.createElement('div');
-      badge.className = 'badge-green';
-      badge.textContent = n > 99 ? '99+' : n;
-      meta.append(badge);
-    }
-
-    row.append(av, col, meta);
-    main.append(row);
+  if (config.splitGroups) {
+    const contacts = rows.filter(c => !c.isGroup);
+    const groups = rows.filter(c => c.isGroup);
+    if (contacts.length) { addSection(main, 'Contacts'); for (const c of contacts) main.append(buildRow(c)); }
+    if (groups.length) { addSection(main, 'Groupes'); for (const c of groups) main.append(buildRow(c)); }
+  } else {
+    for (const c of rows) main.append(buildRow(c));
   }
+}
+
+/* Feuille "Trier et afficher". */
+function openSortSheet() {
+  const bg = document.createElement('div');
+  bg.className = 'sheet-bg';
+  bg.onclick = (e) => { if (e.target === bg) bg.remove(); };
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  const h = document.createElement('h3');
+  h.textContent = 'Trier et afficher';
+  sheet.append(h);
+
+  const options = [
+    ['recent', 'Plus recents'],
+    ['oldest', 'Plus anciens'],
+    ['unread', 'Non lus d\'abord'],
+    ['az', 'Alphabetique (A-Z)']
+  ];
+  for (const [val, label] of options) {
+    const b = document.createElement('button');
+    b.className = 'opt';
+    const on = (config.sort || 'recent') === val;
+    b.innerHTML = `<span style="flex:1">${escape(label)}</span>${on ? '&#10003;' : ''}`;
+    b.onclick = () => { config.sort = val; save(); bg.remove(); render(); };
+    sheet.append(b);
+  }
+
+  const split = document.createElement('button');
+  split.className = 'opt';
+  split.innerHTML = `<span style="flex:1">Separer groupes et contacts</span>${config.splitGroups ? '&#10003;' : ''}`;
+  split.onclick = () => { config.splitGroups = !config.splitGroups; save(); bg.remove(); render(); };
+  sheet.append(split);
+
+  const cancel = document.createElement('button');
+  cancel.className = 'opt';
+  cancel.style.color = 'var(--muted)';
+  cancel.innerHTML = `<span style="flex:1">Fermer</span>`;
+  cancel.onclick = () => bg.remove();
+  sheet.append(cancel);
+
+  bg.append(sheet);
+  document.body.append(bg);
 }
 
 /* ------------------------------------------------------------------ */
@@ -664,6 +875,47 @@ function renderSettings() {
     warn.textContent = "Autorisation manquante : la bulle ne s'affichera pas tant qu'elle n'est pas accordee.";
     panel.append(warn);
   }
+
+  /* --- Affichage --- */
+  const dHead = document.createElement('div');
+  dHead.className = 'subhead';
+  dHead.style.marginTop = '20px';
+  dHead.textContent = 'Affichage';
+  panel.append(dHead);
+
+  const unreadBtn = document.createElement('button');
+  unreadBtn.className = (config.showUnread !== false) ? 'action' : 'action ghost';
+  unreadBtn.style.cssText = 'width:100%;margin:6px 0';
+  unreadBtn.textContent = (config.showUnread !== false) ? 'Onglet « Non lus » affiche' : 'Onglet « Non lus » masque';
+  unreadBtn.onclick = () => {
+    config.showUnread = (config.showUnread === false);
+    if (config.showUnread === false && active === 'unread') active = firstTab();
+    save(); renderSettings();
+  };
+  panel.append(unreadBtn);
+
+  const contactsOn = config.useContacts === true;
+  const cAllowed = Bridge.contactsAllowed ? Bridge.contactsAllowed() : false;
+  const contactsBtn = document.createElement('button');
+  contactsBtn.className = contactsOn ? 'action' : 'action ghost';
+  contactsBtn.style.cssText = 'width:100%;margin:6px 0';
+  contactsBtn.textContent = contactsOn ? 'Repertoire lie (numeros auto)' : 'Lier au repertoire (numeros auto)';
+  contactsBtn.onclick = () => {
+    config.useContacts = !contactsOn;
+    save();
+    if (config.useContacts && Bridge.contactsAllowed && !Bridge.contactsAllowed() && Bridge.requestContacts) {
+      Bridge.requestContacts();
+    }
+    renderSettings();
+  };
+  panel.append(contactsBtn);
+
+  const cNote = document.createElement('p');
+  cNote.style.cssText = 'margin:2px 0 0;color:var(--muted);font-size:13px';
+  cNote.textContent = contactsOn && !cAllowed
+    ? "Autorisation contacts manquante : appuie a nouveau pour l'accorder."
+    : "Retrouve le numero d'un contact par son nom (nom identique dans le repertoire). Rien n'est envoye ; la recherche reste sur le telephone.";
+  panel.append(cNote);
 
   /* --- Listes --- */
   const listHead = document.createElement('div');
@@ -999,13 +1251,19 @@ function open(c) {
   // depuis une autre app. On ouvre donc WhatsApp simplement.
   if (c.isGroup) { launchChat(''); return; }
 
-  // Contact direct : si le numero est connu, on ouvre la conversation ;
-  // sinon on le demande une fois via une saisie integree (fiable).
+  // Contact direct : si le numero est connu, on ouvre la conversation.
   if (config.phones[c.conversation]) {
     launchChat(config.phones[c.conversation]);
-  } else {
-    openNumberSheet(c);
+    return;
   }
+  // Sinon, si le repertoire est lie, on tente de trouver le numero par le nom.
+  if (config.useContacts && Bridge.contactsAllowed && Bridge.contactsAllowed()) {
+    let num = '';
+    try { num = Bridge.lookupNumber(c.conversation) || ''; } catch (e) {}
+    if (num) { config.phones[c.conversation] = num; save(); launchChat(num); return; }
+  }
+  // En dernier recours, on demande le numero une fois (saisie integree).
+  openNumberSheet(c);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1047,9 +1305,17 @@ function boot() {
 document.getElementById('toggle-settings').onclick = () => {
   settingsOpen = !settingsOpen;
   document.getElementById('toggle-settings').textContent = settingsOpen ? 'Termine' : 'Listes';
-  document.getElementById('screen-title').textContent = settingsOpen ? 'Listes' : 'Triage';
+  document.getElementById('screen-title').textContent = settingsOpen ? 'Reglages' : 'Triage';
+  if (settingsOpen) { searchQuery = ''; const s = document.getElementById('search'); if (s) s.value = ''; }
   render();
 };
+
+document.getElementById('sort-btn').onclick = () => { if (!settingsOpen) openSortSheet(); };
+
+document.getElementById('search').addEventListener('input', (e) => {
+  searchQuery = (e.target.value || '').trim();
+  if (!settingsOpen) renderList();
+});
 
 function escape(s) {
   return String(s).replace(/[&<>"]/g, ch =>

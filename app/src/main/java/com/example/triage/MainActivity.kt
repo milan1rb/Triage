@@ -2,8 +2,11 @@ package com.example.triage
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.provider.Settings
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -98,6 +101,59 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun hideBubble() { activity.runOnUiThread { Bubble.hide(activity) } }
+
+        /** Le repertoire est-il autorise ? */
+        @JavascriptInterface
+        fun contactsAllowed(): Boolean =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                activity.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) ==
+                PackageManager.PERMISSION_GRANTED
+
+        /** Demande l'acces au repertoire. */
+        @JavascriptInterface
+        fun requestContacts() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                activity.runOnUiThread {
+                    activity.requestPermissions(
+                        arrayOf(android.Manifest.permission.READ_CONTACTS), 1001
+                    )
+                }
+            }
+        }
+
+        /**
+         * Cherche dans le repertoire un contact dont le nom correspond, et renvoie
+         * son numero au format international sans + (chaine vide si rien trouve).
+         */
+        @JavascriptInterface
+        fun lookupNumber(name: String): String {
+            if (!contactsAllowed() || name.isBlank()) return ""
+            return try {
+                val cursor = activity.contentResolver.query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " = ?",
+                    arrayOf(name),
+                    null
+                )
+                var raw = ""
+                cursor?.use { if (it.moveToFirst()) raw = it.getString(0) ?: "" }
+                normalizeNumber(raw)
+            } catch (e: Exception) {
+                ""
+            }
+        }
+
+        /** Nettoie un numero du repertoire vers un format international sans +. */
+        private fun normalizeNumber(input: String): String {
+            var s = input.filter { it.isDigit() || it == '+' }
+            if (s.startsWith("+")) s = s.drop(1).filter { it.isDigit() }
+            else s = s.filter { it.isDigit() }
+            if (s.startsWith("00")) s = s.drop(2)
+            // Numero national francais (0X sur 10 chiffres) -> prefixe 33.
+            if (s.length == 10 && s.startsWith("0")) s = "33" + s.drop(1)
+            return s
+        }
 
         /**
          * Ouvre une conversation dans le vrai WhatsApp.
