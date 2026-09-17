@@ -116,7 +116,8 @@
   .add-btn:active { background: var(--line); }
 
   .tag {
-    font-size: 11px; font-weight: 600; color: #fff;
+    font-size: 11px; font-weight: 600; color: var(--green-deep);
+    background: var(--green-soft);
     padding: 1px 7px; border-radius: 9px; display: inline-block;
   }
 
@@ -151,6 +152,24 @@
   .sheet .opt { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 13px 6px; border-top: 1px solid var(--line); font-size: 16px; color: var(--ink); }
   .sheet .opt:active { background: var(--hover); }
   .swatch-dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
+
+  /* gestion des listes : lignes compactes reordonnables */
+  .mrow {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 2px; border-top: 1px solid var(--line);
+  }
+  .mrow.dragging { opacity: .55; background: var(--hover); }
+  .drag {
+    flex: 0 0 auto; touch-action: none; cursor: grab;
+    color: var(--muted); font-size: 20px; line-height: 1; padding: 4px 6px;
+  }
+  .mrow .field { margin: 0; flex: 1; }
+  .mini {
+    flex: 0 0 auto; padding: 7px 12px; border-radius: 18px;
+    background: var(--chip); color: var(--ink); font-size: 14px; font-weight: 600;
+  }
+  .mini.danger { color: #c0392b; }
+  .mrow-label { flex: 1; min-width: 0; font-weight: 500; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -209,6 +228,7 @@ const COLORS = ['#2f6fed', '#0f8a5f', '#b4471f', '#7b4bc4', '#0f7b8a', '#9c6b1f'
 
 const defaults = {
   lists: [],
+  manual: [], // contacts epingles manuellement (nom + note), toujours affiches
   seen: {},   // conversation -> timestamp du dernier message consulte
   phones: {}  // conversation -> numero international
 };
@@ -236,6 +256,7 @@ function load() {
   cfg.lists.forEach(l => { if (!Array.isArray(l.members)) l.members = []; });
   cfg.seen = cfg.seen || {};
   cfg.phones = cfg.phones || {};
+  cfg.manual = Array.isArray(cfg.manual) ? cfg.manual : [];
   return cfg;
 }
 function save() {
@@ -254,7 +275,22 @@ function conversations() {
       byName.set(m.conversation, m);
     }
   }
-  return [...byName.values()].sort((a, b) => b.postTime - a.postTime);
+  // Contacts epingles : toujours affiches, meme sans notification (ex. discussion avec soi-meme).
+  for (const mc of (config.manual || [])) {
+    if (!byName.has(mc.name)) {
+      byName.set(mc.name, {
+        conversation: mc.name, sender: mc.name,
+        text: mc.note || 'Contact epingle',
+        isGroup: false, postTime: 0, manual: true
+      });
+    }
+  }
+  // Epingles en haut, le reste par date decroissante.
+  return [...byName.values()].sort((a, b) => {
+    const pa = a.manual ? 1 : 0, pb = b.manual ? 1 : 0;
+    if (pa !== pb) return pb - pa;
+    return b.postTime - a.postTime;
+  });
 }
 
 /* Une entree de config.lists peut etre un vrai onglet ou un separateur "|". */
@@ -327,12 +363,11 @@ function makeTab(id, label, unread, total) {
   btn.role = 'tab';
   btn.setAttribute('aria-selected', active === id);
   btn.innerHTML = `<span>${escape(label)}</span>`;
-  if (total > 0) {
+  // Pastille verte uniquement s'il y a des messages non lus dans cet onglet.
+  if (unread > 0) {
     const badge = document.createElement('span');
-    // Noir avec le nombre de non-lus s'il y en a ; sinon gris clair avec le total.
-    badge.className = 'count ' + (unread > 0 ? 'on' : 'off');
-    const n = unread > 0 ? unread : total;
-    badge.textContent = n > 99 ? '99+' : n;
+    badge.className = 'count on';
+    badge.textContent = unread > 99 ? '99+' : unread;
     btn.append(badge);
   }
   btn.onclick = () => { active = id; render(); };
@@ -415,7 +450,7 @@ function renderList() {
     let tags = '';
     if (active === 'unread') {
       tags = listsOf(c.conversation)
-        .map(l => `<span class="tag" style="background:${l.color}">${escape(l.name)}</span>`)
+        .map(l => `<span class="tag">${escape(l.name)}</span>`)
         .join(' ');
     }
     col.innerHTML = `
@@ -429,7 +464,7 @@ function renderList() {
     meta.className = 'meta';
     const time = document.createElement('div');
     time.className = 'time';
-    time.textContent = clock(c.postTime);
+    time.textContent = c.postTime ? clock(c.postTime) : '';
     meta.append(time);
 
     if (active === 'unread' && !inAnyList(c.conversation)) {
@@ -474,7 +509,7 @@ function openAssignSheet(name) {
     const opt = document.createElement('button');
     opt.className = 'opt';
     opt.innerHTML =
-      `<span class="swatch-dot" style="background:${l.color}"></span>` +
+      `<span class="swatch-dot" style="background:var(--green-deep)"></span>` +
       `<span style="flex:1">${escape(l.name)}</span>` +
       (already ? '&#10003;' : '');
     opt.onclick = () => {
@@ -531,58 +566,85 @@ function renderSettings() {
   const main = document.getElementById('main');
   const panel = document.createElement('div');
   panel.className = 'panel';
-  panel.innerHTML = `<h2>Tes listes</h2>
-    <p>Cree des listes et coche les discussions a y mettre. Seules les discussions deja recues apparaissent (l'app ne peut pas lire ton historique WhatsApp).</p>`;
+  panel.innerHTML = `<h2>Reglages</h2>`;
 
-  const all = conversations();
+  /* --- Contacts epingles (manuels, ex. discussion avec soi-meme) --- */
+  const pinHead = document.createElement('div');
+  pinHead.className = 'subhead';
+  pinHead.textContent = 'Contacts epingles';
+  panel.append(pinHead);
 
-  // Petites fleches pour reordonner une entree (liste ou separateur).
-  const moveButtons = (l) => {
-    const i = config.lists.indexOf(l);
-    const box = document.createElement('div');
-    box.className = 'sheet-actions';
-    const up = document.createElement('button');
-    up.className = 'action ghost';
-    up.textContent = '↑';
-    up.disabled = i <= 0;
-    up.onclick = () => {
-      if (i > 0) { const t = config.lists[i-1]; config.lists[i-1] = l; config.lists[i] = t; save(); renderSettings(); }
-    };
-    const down = document.createElement('button');
-    down.className = 'action ghost';
-    down.textContent = '↓';
-    down.disabled = i >= config.lists.length - 1;
-    down.onclick = () => {
-      if (i < config.lists.length - 1) { const t = config.lists[i+1]; config.lists[i+1] = l; config.lists[i] = t; save(); renderSettings(); }
-    };
-    box.append(up, down);
-    return box;
-  };
+  const pinNote = document.createElement('p');
+  pinNote.style.cssText = 'margin:2px 0 8px;color:var(--muted);font-size:14px';
+  pinNote.textContent = "Toujours affiches, meme sans notification (utile pour ta discussion avec toi-meme).";
+  panel.append(pinNote);
+
+  for (const mc of (config.manual || [])) {
+    const r = document.createElement('div');
+    r.className = 'mrow';
+    const lab = document.createElement('span');
+    lab.className = 'mrow-label';
+    lab.style.color = 'var(--ink)';
+    lab.textContent = mc.name + (config.phones[mc.name] ? '' : '  (sans numero)');
+    const rm = document.createElement('button');
+    rm.className = 'mini danger';
+    rm.textContent = 'Retirer';
+    rm.onclick = () => { config.manual = config.manual.filter(x => x.name !== mc.name); save(); renderSettings(); };
+    r.append(lab, rm);
+    panel.append(r);
+  }
+
+  const pinBtns = document.createElement('div');
+  pinBtns.className = 'sheet-actions';
+  pinBtns.style.margin = '10px 0 4px';
+  const addC = document.createElement('button');
+  addC.className = 'action ghost';
+  addC.textContent = 'Ajouter un contact';
+  addC.onclick = () => addManualContact();
+  const addMe = document.createElement('button');
+  addMe.className = 'action ghost';
+  addMe.textContent = "M'ajouter (moi-meme)";
+  addMe.onclick = () => addSelfChat();
+  pinBtns.append(addC, addMe);
+  panel.append(pinBtns);
+
+  /* --- Listes --- */
+  const listHead = document.createElement('div');
+  listHead.className = 'subhead';
+  listHead.style.marginTop = '20px';
+  listHead.textContent = 'Tes listes';
+  panel.append(listHead);
+
+  const listNote = document.createElement('p');
+  listNote.style.cssText = 'margin:2px 0 6px;color:var(--muted);font-size:14px';
+  listNote.textContent = 'Glisse la poignee pour reordonner. « Gerer » pour ajouter/retirer des contacts.';
+  panel.append(listNote);
+
+  const box = document.createElement('div');
+  box.id = 'list-manager';
+  panel.append(box);
 
   for (const l of config.lists) {
-    const block = document.createElement('div');
-    block.className = 'list-edit';
+    const row = document.createElement('div');
+    row.className = 'mrow';
+    row.dataset.id = l.id;
 
-    // --- separateur "|" : bloc minimal ---
+    const handle = document.createElement('span');
+    handle.className = 'drag';
+    handle.textContent = '\u2261'; // ≡
+    handle.setAttribute('aria-label', 'Reordonner');
+    row.append(handle);
+
     if (isSeparator(l)) {
-      const lab = document.createElement('div');
-      lab.className = 'subhead';
-      lab.style.margin = '4px 0 10px';
+      const lab = document.createElement('span');
+      lab.className = 'mrow-label';
       lab.textContent = 'Separateur  |';
-
       const del = document.createElement('button');
-      del.className = 'action ghost';
-      del.textContent = 'Supprimer le separateur';
-      del.onclick = () => {
-        config.lists = config.lists.filter(x => x.id !== l.id);
-        save(); renderSettings();
-      };
-      const actions = document.createElement('div');
-      actions.className = 'sheet-actions';
-      actions.append(del);
-
-      block.append(lab, moveButtons(l), actions);
-      panel.append(block);
+      del.className = 'mini danger';
+      del.textContent = 'Supprimer';
+      del.onclick = () => { config.lists = config.lists.filter(x => x.id !== l.id); save(); renderSettings(); };
+      row.append(lab, del);
+      box.append(row);
       continue;
     }
 
@@ -592,74 +654,32 @@ function renderSettings() {
     name.setAttribute('aria-label', 'Nom de la liste');
     name.oninput = () => { l.name = name.value; save(); renderTabs(); };
 
-    const swatches = document.createElement('div');
-    swatches.className = 'swatches';
-    for (const color of COLORS) {
-      const s = document.createElement('button');
-      s.className = 'swatch';
-      s.style.background = color;
-      s.setAttribute('aria-pressed', l.color === color);
-      s.setAttribute('aria-label', 'Couleur ' + color);
-      s.onclick = () => { l.color = color; save(); render(); };
-      swatches.append(s);
-    }
-
-    const sub = document.createElement('div');
-    sub.className = 'subhead';
-    sub.textContent = 'Discussions dans cette liste';
-
-    const wrap = document.createElement('div');
-    wrap.className = 'pick-wrap';
-    if (!all.length) {
-      wrap.innerHTML = `<div class="pick-empty">Aucune discussion captee pour l'instant. Elles s'ajouteront ici des qu'un message arrivera.</div>`;
-    } else {
-      for (const c of all) {
-        const inList = l.members.includes(c.conversation);
-        const item = document.createElement('button');
-        item.className = 'pick';
-        item.setAttribute('aria-pressed', inList);
-        item.innerHTML = `<span class="box">${inList ? '&#10003;' : ''}</span><span class="pname">${escape(c.conversation)}</span>`;
-        item.onclick = () => {
-          if (l.members.includes(c.conversation)) {
-            l.members = l.members.filter(n => n !== c.conversation);
-          } else {
-            l.members.push(c.conversation);
-          }
-          save();
-          renderSettings();
-        };
-        wrap.append(item);
-      }
-    }
+    const manage = document.createElement('button');
+    manage.className = 'mini';
+    manage.textContent = 'Gerer';
+    manage.onclick = () => openManageContacts(l);
 
     const del = document.createElement('button');
-    del.className = 'action ghost';
-    del.textContent = 'Supprimer cette liste';
+    del.className = 'mini danger';
+    del.textContent = 'Suppr';
     del.onclick = () => {
       config.lists = config.lists.filter(x => x.id !== l.id);
       if (active === l.id) active = 'unread';
       save(); renderSettings();
     };
 
-    const actions = document.createElement('div');
-    actions.className = 'sheet-actions';
-    actions.append(del);
-
-    block.append(name, swatches, sub, wrap, moveButtons(l), actions);
-    panel.append(block);
+    row.append(name, manage, del);
+    box.append(row);
   }
+
+  enableDrag(box);
 
   const add = document.createElement('button');
   add.className = 'action';
   add.textContent = 'Nouvelle liste';
-  add.style.marginTop = '18px';
+  add.style.marginTop = '16px';
   add.onclick = () => {
-    config.lists.push({
-      id: 'f' + Date.now(),
-      name: 'Sans nom',
-      color: COLORS[config.lists.length % COLORS.length],
-      members: []
-    });
+    config.lists.push({ id: 'f' + Date.now(), name: 'Sans nom', members: [] });
     save(); renderSettings();
   };
 
@@ -674,6 +694,153 @@ function renderSettings() {
 
   panel.append(add, addSep);
   main.append(panel);
+}
+
+/* Reordonnancement par glisser de la poignee (pointer events, tactile). */
+function enableDrag(container) {
+  let dragging = null;
+  container.querySelectorAll('.mrow').forEach(row => {
+    const handle = row.querySelector('.drag');
+    if (!handle) return;
+    handle.onpointerdown = (e) => {
+      e.preventDefault();
+      dragging = row;
+      row.classList.add('dragging');
+      try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+    };
+    handle.onpointermove = (e) => {
+      if (!dragging) return;
+      const y = e.clientY;
+      const rows = [...container.querySelectorAll('.mrow')];
+      for (const r of rows) {
+        if (r === dragging) continue;
+        const rect = r.getBoundingClientRect();
+        if (y > rect.top && y < rect.bottom) {
+          if (y < rect.top + rect.height / 2) container.insertBefore(dragging, r);
+          else container.insertBefore(dragging, r.nextSibling);
+          break;
+        }
+      }
+    };
+    const end = () => {
+      if (!dragging) return;
+      dragging.classList.remove('dragging');
+      dragging = null;
+      const order = [...container.querySelectorAll('.mrow')].map(r => r.dataset.id);
+      config.lists.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      save(); renderTabs();
+    };
+    handle.onpointerup = end;
+    handle.onpointercancel = end;
+  });
+}
+
+/* Feuille "Gerer les contacts" d'une liste. */
+function openManageContacts(l) {
+  const bg = document.createElement('div');
+  bg.className = 'sheet-bg';
+  bg.onclick = (e) => { if (e.target === bg) { bg.remove(); renderSettings(); } };
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+
+  const h = document.createElement('h3');
+  h.textContent = 'Contacts de ' + l.name;
+  sheet.append(h);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'pick-wrap';
+  const fill = () => {
+    wrap.innerHTML = '';
+    const list = conversations();
+    if (!list.length) {
+      wrap.innerHTML = `<div class="pick-empty">Aucun contact disponible. Ils apparaitront des qu'un message arrivera, ou ajoute-en un par numero ci-dessous.</div>`;
+      return;
+    }
+    for (const c of list) {
+      const inList = l.members.includes(c.conversation);
+      const item = document.createElement('button');
+      item.className = 'pick';
+      item.setAttribute('aria-pressed', inList);
+      item.innerHTML = `<span class="box">${inList ? '&#10003;' : ''}</span><span class="pname">${escape(c.conversation)}</span>`;
+      item.onclick = () => {
+        if (l.members.includes(c.conversation)) l.members = l.members.filter(n => n !== c.conversation);
+        else l.members.push(c.conversation);
+        save(); fill(); renderTabs();
+      };
+      wrap.append(item);
+    }
+  };
+  fill();
+  sheet.append(wrap);
+
+  const addByNum = document.createElement('button');
+  addByNum.className = 'action ghost';
+  addByNum.style.width = '100%';
+  addByNum.textContent = 'Ajouter un contact par numero';
+  addByNum.onclick = () => {
+    bg.remove();
+    addManualContact('', 'Contact epingle', (name) => {
+      if (!l.members.includes(name)) l.members.push(name);
+      save(); render();
+    });
+  };
+  sheet.append(addByNum);
+
+  const done = document.createElement('button');
+  done.className = 'action';
+  done.style.cssText = 'width:100%;margin-top:8px';
+  done.textContent = 'Termine';
+  done.onclick = () => { bg.remove(); renderSettings(); };
+  sheet.append(done);
+
+  bg.append(sheet);
+  document.body.append(bg);
+}
+
+/* Ajout d'un contact epingle (nom puis numero). */
+function addManualContact(prefName, prefNote, onCreated) {
+  inputSheet({
+    title: 'Nom du contact',
+    hint: "Le nom qui s'affichera dans la liste.",
+    value: prefName || '',
+    confirm: 'Suivant',
+    onConfirm: (nm) => {
+      const name = (nm || '').trim();
+      if (!name) return;
+      inputSheet({
+        title: 'Numero de ' + name,
+        hint: "Format international sans + : 33612345678. Laisse vide si pas d'ouverture directe.",
+        type: 'tel',
+        confirm: 'Ajouter',
+        onConfirm: (ph) => {
+          const d = (ph || '').replace(/\D/g, '');
+          config.manual = config.manual || [];
+          if (!config.manual.some(x => x.name === name)) config.manual.push({ name, note: prefNote || 'Contact epingle' });
+          if (d) config.phones[name] = d;
+          save(); render();
+          if (onCreated) onCreated(name);
+        }
+      });
+    }
+  });
+}
+
+/* Ajout rapide de la discussion avec soi-meme. */
+function addSelfChat() {
+  inputSheet({
+    title: 'Ma discussion (moi-meme)',
+    hint: "Entre TON numero WhatsApp au format international sans + (ex. 33612345678).",
+    type: 'tel',
+    confirm: 'Ajouter',
+    onConfirm: (ph) => {
+      const d = (ph || '').replace(/\D/g, '');
+      const name = 'Moi';
+      config.manual = config.manual || [];
+      if (!config.manual.some(x => x.name === name)) config.manual.push({ name, note: 'Mes messages' });
+      if (d) config.phones[name] = d;
+      save(); render();
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ */
